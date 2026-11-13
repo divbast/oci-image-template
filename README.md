@@ -146,6 +146,9 @@ real, signed for this repository with Sigstore. The run says
 `rehearsal: nothing was published to ghcr.io` in a warning and on its
 summary.
 
+Only this repository may rehearse: since divbast/ci v2, `rehearse: true`
+fails the publish job anywhere else.
+
 ## Dependency updates
 
 Every input the Containerfile names is pinned by digest: the distroless
@@ -276,7 +279,10 @@ renamed for you. Then, in this order:
    then the app can keep building on `:baikal`: CI verifies the
    attestation of any divbast/frankenphp binary.
 8. **The publish switch.** In `build.yml`'s `publish` job, set `image` to
-   `ghcr.io/divbast/<app>` and remove `rehearse: true`. Once that is on
+   `ghcr.io/divbast/<app>` and remove `rehearse: true`. Do this before the
+   app's first run: divbast/ci v2 rehearses only in
+   `divbast/oci-image-template`, so a repository made from the template
+   that keeps `rehearse: true` goes red at its publish job. Once that is on
    `main`, publish once by the button: run `build` from `main` by hand.
    Confirm that the package is public. The run's last step pulls both tags
    as an anonymous client, and fails while the package is private; a
