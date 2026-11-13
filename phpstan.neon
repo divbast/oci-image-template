@@ -1,0 +1,13 @@
+# SPDX-License-Identifier: BSD-2-Clause
+# SPDX-FileCopyrightText: 2026 Aryan Ameri <github@aryan.ameri.coffee>
+
+includes:
+    - vendor/phpstan/phpstan/conf/bleedingEdge.neon
+
+parameters:
+    level: max
+    phpVersion: 80500
+    paths:
+        - public/index.php
+        - rootfs/usr/local/bin/template-health
+        - rootfs/usr/local/share/template-health/index.php

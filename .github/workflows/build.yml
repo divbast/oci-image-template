@@ -1,0 +1,93 @@
+# SPDX-License-Identifier: BSD-2-Clause
+# SPDX-FileCopyrightText: 2026 Aryan Ameri <github@aryan.ameri.coffee>
+
+# Lint, build, test and scan through divbast/ci's app-check.yml on every
+# event, and publish through its app-publish.yml from the daily slot and the
+# button. Both run this repository's own justfile recipes, which import the
+# shared ones from divbast/ci at the commit pinned below.
+
+name: build
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  schedule:
+    #
+    # The daily slot, and the only automatic publish: it publishes main when
+    # main moved since the commit the published :latest was built from, so
+    # users see at most one new image a day however many merges land. It
+    # also checks whether something outside this repository has changed:
+    # the runner images, or the vulnerability database the scan reads, so a
+    # new advisory against the pinned image shows within a day rather than
+    # a week. 19:07 UTC is 06:07 in Melbourne under daylight saving, 05:07
+    # outside it: 20 minutes after the LibreSpeed image's slot, so the two
+    # images' runs do not share the organisation's 20 concurrent jobs.
+    - cron: '07 19 * * *'
+  # The button: run from main, it publishes now, for an urgent fix.
+  workflow_dispatch:
+
+permissions: {}
+
+# GitHub keeps one pending run per group, and a newer one replaces it. The
+# event in the group stops a push run, frequent now that Renovate merges on
+# its own, from replacing a pending slot or button run.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}-${{ github.event_name }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+jobs:
+  check:
+    name: check
+    uses: divbast/ci/.github/workflows/app-check.yml@808c40dcaa2abc33d0f671dd8f07ec5d57239b10 # v1.16.0
+    permissions:
+      contents: read
+      attestations: read # verify the FrankenPHP binary
+      security-events: write # code scanning, from main
+
+  # The one check main's ruleset requires, so the job list can change without
+  # touching the ruleset. GitHub counts a skipped required check as passing,
+  # so this runs always and treats a skipped or cancelled job as a failure.
+  required:
+    name: required
+    needs: [check]
+    if: always()
+    runs-on: ubuntu-26.04
+    timeout-minutes: 5
+    permissions: {}
+    steps:
+      - name: Fail unless every needed job succeeded
+        env:
+          RESULTS: ${{ join(needs.*.result, ' ') }}
+        run: |
+          for result in ${RESULTS}; do
+            if [ "${result}" != success ]; then
+              echo "a required job ended ${result}" >&2
+              exit 1
+            fi
+          done
+
+  publish:
+    name: publish
+    needs: [required]
+    # The daily slot and the button, from main only. A push never publishes.
+    if: >-
+      github.ref == 'refs/heads/main'
+      && (github.event_name == 'schedule' || github.event_name == 'workflow_dispatch')
+    uses: divbast/ci/.github/workflows/app-publish.yml@808c40dcaa2abc33d0f671dd8f07ec5d57239b10 # v1.16.0
+    with:
+      image: ghcr.io/divbast/oci-image-template
+      version-arg: TEMPLATE_VERSION
+      description: A minimal divbast app, one PHP page on FrankenPHP. Zero capabilities, read-only root, non-root, no shell
+      # Decides against image, then pushes, attests and verifies in a
+      # registry the job starts for itself, so nothing reaches ghcr.io. An
+      # app made from this repository sets image to its own and removes
+      # this line: README.md's "Making a new app", step 8.
+      rehearse: true
+    # Everything app-publish.yml's job asks for, rehearsing or not: a called
+    # job that asks for more than its caller grants fails.
+    permissions:
+      contents: read
+      packages: write # read ghcr.io to decide, and push there once it publishes
+      id-token: write # Sigstore signs against the runner's OIDC identity
+      attestations: write # write the attestation

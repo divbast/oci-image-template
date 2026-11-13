@@ -1,2 +1,6 @@
+<!-- SPDX-License-Identifier: BSD-2-Clause -->
+<!-- SPDX-FileCopyrightText: 2026 Aryan Ameri <github@aryan.ameri.coffee> -->
+
 # oci-image-template
+
 A minimal working app to start a new divbast image from
