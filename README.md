@@ -292,12 +292,12 @@ renamed for you. Then, in this order:
    and add `published: ghcr.io/divbast/<app>:latest` under its `with`.
    LibreSpeed's `stall.yml` is that shape: `published` alone. In that
    order: until the image is public, slots count every slot run since the
-   repository was made as a lost slot. Then rewrite what says the app rehearses: this README's
-   opening, "Running", where it says there is no published image, and
-   "Publishing"; `CLAUDE.md`'s opening, where it says the app publishes
-   nothing to ghcr.io, and its bullet on the rehearsal; and the comment
-   above `rehearse` in `build.yml`. The one above `checks` in `stall.yml`
-   goes with that line.
+   repository was made as a lost slot. Then rewrite what says the app
+   rehearses: this README's opening, "Running", where it says there is no
+   published image, and "Publishing"; `CLAUDE.md`'s opening, where it says
+   the app publishes nothing to ghcr.io, and its bullet on the rehearsal;
+   and the comment above `rehearse` in `build.yml`. The one above `checks`
+   in `stall.yml` goes with that line.
 9. **The organisation's profile.** Add the image's row to the table in
    divbast/.github's profile README.
 
