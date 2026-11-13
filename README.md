@@ -279,9 +279,11 @@ renamed for you. Then, in this order:
    then the app can keep building on `:baikal`: CI verifies the
    attestation of any divbast/frankenphp binary.
 8. **The publish switch.** In `build.yml`'s `publish` job, set `image` to
-   `ghcr.io/divbast/<app>` and remove `rehearse: true`. Do this before the
-   app's first run: divbast/ci v2 rehearses only in
-   `divbast/oci-image-template`, so a repository made from the template
+   `ghcr.io/divbast/<app>` and remove `rehearse: true`. Do this once the app
+   is ready to publish, not before: it is what lets the first image reach
+   `ghcr.io/divbast/<app>` and creates the package. Until then each daily
+   slot's publish job fails by design, because divbast/ci v2 rehearses only
+   in `divbast/oci-image-template`, so a repository made from the template
    that keeps `rehearse: true` goes red at its publish job. Once that is on
    `main`, publish once by the button: run `build` from `main` by hand.
    Confirm that the package is public. The run's last step pulls both tags
