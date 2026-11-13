@@ -1,0 +1,62 @@
+# SPDX-License-Identifier: BSD-2-Clause
+# SPDX-FileCopyrightText: 2026 Aryan Ameri <github@aryan.ameri.coffee>
+{
+	# Plain HTTP, with no certificates to fetch or keep: TLS, where there is
+	# any, ends at a proxy in front of the container.
+	auto_https off
+	# No admin API. Caddy would otherwise listen on 127.0.0.1:2019, outside
+	# the contract's two ports, and take a new config from anything that
+	# shares the container's network, with no credentials. Nothing here
+	# reloads, and FrankenPHP's admin routes only restart workers, which
+	# this server does not run.
+	admin off
+	frankenphp
+	log {
+		output stdout
+		format json
+		exclude http.handlers.php
+	}
+	# PHP's error log, which FrankenPHP writes as the php handler. php.ini
+	# lets only real errors through.
+	log php {
+		output stderr
+		format json
+		include http.handlers.php
+	}
+}
+
+# An allowlist: what is not named here is a 404. No php_server, which would
+# hand every path it finds no file for to index.php, /healthz among them.
+:8080 {
+	root /var/www/template
+
+	handle / {
+		rewrite * /index.php
+		php
+	}
+
+	handle {
+		respond 404
+	}
+
+	log {
+		output stdout
+		format json
+	}
+}
+
+# Internal health listener, meant to stay unpublished: /healthz, and a 404
+# for everything else. Its root is outside the served tree, and the rewrite
+# names the one script it runs. It deliberately carries no log block:
+# HEALTHCHECK asks for /healthz every 30 s, and those thousands of access-log
+# lines a day would bury :8080's, which are the ones worth reading.
+:8081 {
+	root /usr/local/share/template-health
+	handle /healthz {
+		rewrite * /index.php
+		php
+	}
+	handle {
+		respond 404
+	}
+}
