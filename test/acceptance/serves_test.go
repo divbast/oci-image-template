@@ -22,10 +22,6 @@ import (
 // stands would answer its source, and php-cli would say cli.
 const page = "Hello from frankenphp\n"
 
-// portServes is the host port TestServes publishes the app port on. The
-// harness cannot read back a port the engine picked, so it is fixed.
-const portServes = 18480
-
 // serveWithin bounds how long a container may take to serve, and
 // attemptWithin each request while it waits.
 const (
@@ -59,13 +55,19 @@ func TestServes(t *testing.T) {
 		Image:   image,
 		Network: network,
 		Confine: harness.Contract(tmpfsSize),
-		Publish: []string{fmt.Sprintf("127.0.0.1:%d:%d", portServes, appPort)},
+		// On loopback, at a host port the engine picks and hostAddr reads
+		// back, so no other test or run can hold it first
+		Publish: []string{fmt.Sprintf("127.0.0.1::%d", appPort)},
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
+	addr, err := hostAddr(ctx, c, appPort)
+	if err != nil {
+		t.Fatal(err)
+	}
 
-	base := fmt.Sprintf("http://127.0.0.1:%d", portServes)
+	base := "http://" + addr
 	status, body, err := getWhenServing(ctx, c, base+"/")
 	checks := harness.NewChecks(t)
 	if err != nil {
@@ -86,6 +88,22 @@ func TestServes(t *testing.T) {
 		checks.True(what+" shows none of the script", !strings.Contains(body, phpOpenTag),
 			fmt.Sprintf("%d bytes: %s", len(body), clip(body)))
 	}
+}
+
+// hostAddr returns where c's port is bound on the host, as ip:port, as the
+// engine reports it: the run leaves the host port to the engine, which
+// picks a free one.
+func hostAddr(ctx context.Context, c *harness.Container, port int) (string, error) {
+	ins, err := c.Inspect(ctx)
+	if err != nil {
+		return "", err
+	}
+	key := strconv.Itoa(port) + "/tcp"
+	addr, ok := ins.Ports[key]
+	if !ok {
+		return "", fmt.Errorf("container %s has no host port for %s: the engine reports %v", c, key, ins.Ports)
+	}
+	return addr, nil
 }
 
 // clipAt is as much of a body as a check quotes.
