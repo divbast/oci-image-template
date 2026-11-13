@@ -1,6 +1,6 @@
 {
   "_comment": [
-    "This repository is not a PHP project: Composer installs PHPStan here, and the PHP the image ships is three files it analyses, not a package"
+    "This repository is not a PHP project: Composer installs PHPStan here, to analyse the three PHP files the image ships, and nothing else"
   ],
   "license": "BSD-2-Clause",
   "require-dev": {

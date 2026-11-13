@@ -8,7 +8,7 @@ image that runs at zero Linux capabilities on a read-only root filesystem
 as a non-root user. It goes through divbast/ci's shared pipeline exactly as
 a real app does: lint, a build for amd64 and arm64, the confinement
 contract and its own acceptance suite under Docker and rootless Podman, a
-vulnerability scan, and a daily publish.
+vulnerability scan, and a daily rehearsed publish.
 
 Every new divbast image repository starts as a copy of this one.
 [Making a new app](#making-a-new-app) lists what to change, in order.
@@ -52,8 +52,9 @@ Nothing in the image opens a connection out, and PHP's URL streams are off.
 
 ## Running
 
-There is no published image, so build it first, with `just setup` and then
-`just build`:
+There is no published image, so build one first, with Podman to match the
+command below: `just setup`, then `ENGINE=podman just build`, which tags it
+`localhost/oci-image-template:dev`.
 
 ```bash
 podman run -d --name oci-image-template \
@@ -66,7 +67,8 @@ podman run -d --name oci-image-template \
 
 What is served on 8080 is an allowlist: `/`, the page, which PHP writes as
 `Hello from frankenphp`, the name of the server API it ran under. Everything
-else is a 404, `/index.php` included.
+else is a 404 with an empty body, `/index.php` included. The acceptance
+suite checks the page, `/index.php` and a path nothing names.
 
 The access log goes to stdout and PHP's errors to stderr, both as JSON.
 
@@ -228,21 +230,44 @@ renamed for you. Then, in this order:
    stage are a worked example.
 5. **The contract.** Set what the app's confinement contract says, in
    `test/acceptance/contract_test.go` and in the Containerfile alike, then
-   in the tables here and in `CLAUDE.md`: the `/tmp` size, the paths
-   `HealthOnly404` asks the health port to refuse, PID 1's argv, the health
-   command and the `HEALTHCHECK` timings. An app with a bootstrap keeps
-   `PID1` as the server's argv, which the bootstrap execs.
+   in the tables here and in `CLAUDE.md`, the Volume row among them: the
+   `/tmp` size, the paths `HealthOnly404` asks the health port to refuse,
+   PID 1's argv, the health command and the `HEALTHCHECK` timings. An app
+   with a bootstrap keeps `PID1` as the server's argv, which the bootstrap
+   execs. The template leaves the contract's optional fields unset, and an
+   app may need them: `Mounts` for a volume, so an app with `/data` mounts
+   one there; `Env` for the environment the app reads; `Ready` for what
+   must be true before the checks run, past both ports answering;
+   `ProbeApp` for probe subcommands of the app's own; and `Scenario` to run
+   the contract once for each configuration it supports. Each is
+   documented on `contract.Config`, `go -C .ci doc ./contract Config`, and
+   divbast/ci's README, under "Go", says how the package reaches the suite.
 6. **The app.** Replace `public/index.php` and the Caddyfile's `:8080`
    routes with the app, keeping `:8080` an allowlist, and give the
    acceptance suite a test for each thing it serves. Replace the page half
    of the probe, and add the app's own checks to `/healthz`. List every PHP
    file the image ships in `phpstan.neon`'s `paths`.
-7. **Its own binary.** Add the app to divbast/frankenphp, with its own
-   `apps/<app>.env` naming the PHP extensions it needs, and once
-   `ghcr.io/divbast/frankenphp:<app>` is published, point the
-   Containerfile's one `COPY --from=` at it by that digest. Until then the
-   app can keep building on `:baikal`: CI verifies the attestation of any
-   divbast/frankenphp binary.
+7. **Its own binary.** Add the app to divbast/frankenphp in one pull
+   request there:
+   - `apps/<app>.env`, holding each of `PHP_EXTENSIONS`,
+     `PHP_EXTENSION_LIBS`, `EXPECTED_EXTENSIONS` and
+     `REQUIRED_GD_FEATURES` exactly once. The first three must not be
+     empty; `REQUIRED_GD_FEATURES` is empty for an app without gd.
+     `EXPECTED_EXTENSIONS` is every module the binary loads, in lower case;
+   - `<app>` in both `app:` lists in `.github/workflows/build.yml`, the
+     `build` job's matrix (`app: [baikal, librespeed]`) and the `publish`
+     job's;
+   - a `slots-<app>` job, named `slots (<app>)`, in
+     `.github/workflows/stall.yml`, as `slots-baikal` is, with
+     `published: ghcr.io/divbast/frankenphp:<app>`;
+   - `<app>` in the list that `TestRepositoryApps`, in
+     `internal/appenv/appenv_test.go`, expects:
+     `[]string{"baikal", "librespeed"}`.
+
+   Once that merges and `ghcr.io/divbast/frankenphp:<app>` is published,
+   point the Containerfile's one `COPY --from=` at it by that digest. Until
+   then the app can keep building on `:baikal`: CI verifies the
+   attestation of any divbast/frankenphp binary.
 8. **The publish switch.** In `build.yml`'s `publish` job, set `image` to
    `ghcr.io/divbast/<app>` and remove `rehearse: true`. Once that is on
    `main`, publish once by the button: run `build` from `main` by hand.
@@ -253,7 +278,11 @@ renamed for you. Then, in this order:
    `published: ghcr.io/divbast/<app>:latest` under its `with`, as
    LibreSpeed's `stall.yml` does. In that order: until the image is
    public, slots count every slot run since the repository was made as a
-   lost slot.
+   lost slot. Then rewrite what says the app rehearses: this README's
+   opening, "Running", where it says there is no published image, and
+   "Publishing"; `CLAUDE.md`'s opening, where it says the app publishes
+   nothing to ghcr.io, and its bullet on the rehearsal; and the comments
+   above `rehearse` in `build.yml` and above `checks` in `stall.yml`.
 9. **The organisation's profile.** Add the image's row to the table in
    divbast/.github's profile README.
 
