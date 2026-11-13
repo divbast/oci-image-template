@@ -288,11 +288,17 @@ breaking change.
   only on a HIGH or CRITICAL finding, the same vulnerability in the same
   package, that the published image lacks. No release can make an
   advisory against something already shipped any worse, so blocking on one
-  only holds back whatever else the release fixes. "Nothing published"
-  means the registry answers not-found or denied to an anonymous pull of
-  `:latest`; then every finding is reported, on the summary page, as a
-  warning annotation and on stderr, and none blocks. A registry that cannot
-  be reached fails the scan rather than waving it through
+  only holds back whatever else the release fixes. Whether anything is
+  published is the registry's to say, never Trivy's: the scan reads
+  `:latest` as an anonymous client, and when ghcr.io refuses, asks GitHub
+  why, with the check job's token, which is what its `packages: read` is
+  for. Not published yet, or a package still private: every finding is
+  reported, on the summary page, as a warning annotation and on stderr,
+  and none blocks. Once the image is public, only new findings block. A
+  public image the registry refuses, a registry that cannot be reached, or
+  GitHub not answering fails the scan rather than waving it through. A
+  local `just scan` never asks GitHub, so a refusal there is advisory,
+  with a warning that only CI can tell what it means
 - REUSE-compliant SPDX headers on every file; licence is **BSD-2-Clause**.
   The image's licences label names only that, because the image ships
   nothing else of its own; an app that ships an upstream's files adds the
@@ -302,12 +308,13 @@ breaking change.
   confinement the contract claims, `--tmpfs /tmp:size=16m` included, so a
   check can never pass under looser settings than we ship. What CI proves
   is what ships. `TestContract` runs ci's contract suite against the image;
-  `TestServes` asks for the page, and for two paths that must be 404s,
-  from the host, through the app port published on loopback at a host
-  port the engine picks, which the test reads back from the container's
-  inspection (`harness.Inspect.Ports`), so no two tests or runs contend
-  for one. An app gives each thing it serves a test, one topic per file,
-  each publishing its ports the same way
+  `TestServes` is the template's one test of its own. Each serves through
+  the harness's `Serve` (or `StartServing`, for a container that must be
+  started apart from its first request), which publishes on the host's
+  loopback at ports the engine picks, so no two tests, or two suites on one
+  host, ask for the same one. The assertions (`StatusIs`, `Answers`,
+  `Refuses` and the rest) are the harness's too, shared with every divbast
+  image. An app gives each thing it serves a test, one topic per file
 - **Go is modern and idiomatic, and linted strictly**, under ci's
   `go/golangci.yml`. Bash is for what is short and will stay so: the
   justfile's recipes. A check that runs inside a Containerfile build stage
