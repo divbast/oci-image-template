@@ -90,12 +90,14 @@ breaking change.
   is `<check>: <reason>` and the probe relays it: with no shell and no
   access log on 8081, the engine's health log is the only record of why
 - **8080 is an allowlist.** It serves `/`, which the Caddyfile rewrites to
-  `index.php`, and answers 404 to everything else, `/index.php` and
-  `/healthz` included. **No `php_server`**: it hands every path it finds no
-  file for to `index.php`, so `/healthz` on 8080 would answer 200, and the
-  contract's `health-port-only` check fails on that. Every route is a
-  `handle` block, because Caddy sorts a bare directive after the catch-all
-  404
+  `index.php`, and answers 404 with an empty body to everything else,
+  `/index.php` and `/healthz` included. `TestServes` asks for `/index.php`
+  and a path nothing names, and fails on any answer but a 404, or one that
+  carries the script's source, as a catch-all handed to `file_server`
+  would. **No `php_server`**: it hands every path it finds no file for to
+  `index.php`, so `/healthz` on 8080 would answer 200, and the contract's
+  `health-port-only` check fails on that. Every route is a `handle` block,
+  because Caddy sorts a bare directive after the catch-all 404
 - **Nothing listens but 8080 and 8081.** Caddy's admin API would otherwise
   listen on 127.0.0.1:2019 and take a new config, with no credentials, from
   anything sharing the container's network: under host networking, every
@@ -300,9 +302,9 @@ breaking change.
   confinement the contract claims, `--tmpfs /tmp:size=16m` included, so a
   check can never pass under looser settings than we ship. What CI proves
   is what ships. `TestContract` runs ci's contract suite against the image;
-  `TestServes` asks for the page from the host, through a published port,
-  on a fixed host port of its own (18480), since the harness cannot read
-  back one the engine picked. An app gives each thing it serves a test,
+  `TestServes` asks for the page, and for two paths that must be 404s,
+  from the host, through a published port, on a fixed host port of its own
+  (18480), since the harness cannot read back one the engine picked. An app gives each thing it serves a test,
   one topic per file, each on host ports of its own
 - **Go is modern and idiomatic, and linted strictly**, under ci's
   `go/golangci.yml`. Bash is for what is short and will stay so: the

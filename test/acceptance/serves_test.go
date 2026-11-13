@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -32,9 +33,19 @@ const (
 	attemptWithin = 5 * time.Second
 )
 
-// TestServes checks the app serves its page to a client outside the
-// container: GET / through the published app port answers 200 with
-// exactly the page.
+// refused are paths the app port must answer with a 404 that shows none
+// of the script: the script by its own name, which only / may run, and a
+// path nothing names. A catch-all that fell through to a file server
+// would answer the first with the script's source.
+var refused = []string{"/index.php", "/nope"}
+
+// phpOpenTag starts the script's source, which no answer may carry.
+const phpOpenTag = "<?php"
+
+// TestServes checks the app port, from a client outside the container,
+// through the published port: GET / answers 200 with exactly the page, and
+// every other path a 404 that shows none of the script, because the
+// Caddyfile's :8080 is an allowlist.
 func TestServes(t *testing.T) {
 	t.Parallel()
 	e, image := underTest(t)
@@ -54,7 +65,8 @@ func TestServes(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	status, body, err := getWhenServing(ctx, c, fmt.Sprintf("http://127.0.0.1:%d/", portServes))
+	base := fmt.Sprintf("http://127.0.0.1:%d", portServes)
+	status, body, err := getWhenServing(ctx, c, base+"/")
 	checks := harness.NewChecks(t)
 	if err != nil {
 		checks.True("GET / from the host gets an answer", false, err.Error())
@@ -62,6 +74,29 @@ func TestServes(t *testing.T) {
 	}
 	harness.Equal(checks, "GET / from the host answers 200", http.StatusOK, status)
 	harness.Equal(checks, "GET / from the host is exactly the page", page, body)
+
+	for _, path := range refused {
+		what := "GET " + path + " from the host"
+		status, body, err = get(ctx, base+path)
+		if err != nil {
+			checks.True(what+" gets an answer", false, err.Error())
+			continue
+		}
+		harness.Equal(checks, what+" answers 404", http.StatusNotFound, status)
+		checks.True(what+" shows none of the script", !strings.Contains(body, phpOpenTag),
+			fmt.Sprintf("%d bytes: %s", len(body), clip(body)))
+	}
+}
+
+// clipAt is as much of a body as a check quotes.
+const clipAt = 200
+
+// clip quotes body, cut short if it is long.
+func clip(body string) string {
+	if len(body) <= clipAt {
+		return strconv.Quote(body)
+	}
+	return fmt.Sprintf("%q... (%d bytes)", body[:clipAt], len(body))
 }
 
 // getWhenServing sends GET url from the host once a second until any
