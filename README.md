@@ -308,6 +308,9 @@ renamed for you. Then, in this order:
 - `just setup` fetches divbast/ci into `.ci/` at the commit the workflows
   pin, then installs the pinned toolchain from `mise.toml` and PHPStan from
   `composer.lock`. PHP and Composer come from the host.
+- `just scan` reads the published image with
+  [skopeo](https://github.com/containers/skopeo), which must be on `PATH`;
+  so must it for `just ci`. CI runners already have it.
 - `just build` builds the image locally, without verifying the binary's
   attestation; `just ci-tools && .ci/bin/divbast-verify-frankenphp` does,
   with gh 2.102.0 or newer.
