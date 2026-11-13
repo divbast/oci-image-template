@@ -11,7 +11,7 @@ ARG TEMPLATE_VERSION
 
 # The binary divbast/frankenphp builds, by digest. CI refuses it unless that
 # repository's own build on main attested it.
-COPY --from=ghcr.io/divbast/frankenphp:baikal@sha256:a7af26e72704db1e1b93af37a3ee423d1de31cf64c2cd9d4554dae3c91c22465 --chmod=0755 /frankenphp /usr/local/bin/frankenphp
+COPY --from=ghcr.io/divbast/frankenphp:baikal@sha256:23c042d9259caa052bc9a0131f58f75a15f73602fd182a2546b6759dc1e0d1db --chmod=0755 /frankenphp /usr/local/bin/frankenphp
 
 # Root-owned, and never written: everything that changes lives on /tmp. No
 # --chmod on these, because COPY gives a directory it creates the file's
