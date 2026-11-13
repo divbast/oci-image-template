@@ -152,9 +152,10 @@ Every input the Containerfile names is pinned by digest: the distroless
 runtime image, and the FrankenPHP binary, by the digest of
 `ghcr.io/divbast/frankenphp:baikal`. The binary's own inputs are pinned in
 divbast/frankenphp, apart from the C libraries static-php-cli builds into
-it, which come from their newest release whenever the binary is built. So a
-new `:baikal` digest can carry newer C code with no pin moved, and that is
-how fixes to those libraries arrive.
+it, most of which come from their newest release whenever the binary is
+built; sqlite is held at a fixed URL. So a new `:baikal` digest can carry
+newer C code with no pin moved, and that is how fixes to those libraries
+arrive.
 
 A pin only moves through a pull request, and
 [Renovate](https://docs.renovatebot.com/) opens those. It runs every
@@ -227,7 +228,10 @@ renamed for you. Then, in this order:
    Renovate manager in `renovate.json` in the same change: a `customManagers`
    entry for an `ARG` no `FROM` reads, and a `packageRules` entry naming its
    labels and commit prefix. LibreSpeed's `renovate.json` and its fetch
-   stage are a worked example.
+   stage are a worked example. An app that ships the upstream's files adds
+   the upstream's licence to the Containerfile's
+   `org.opencontainers.image.licenses` `LABEL`, as `CLAUDE.md` requires,
+   and says which file carries which licence in this README.
 5. **The contract.** Set what the app's confinement contract says, in
    `test/acceptance/contract_test.go` and in the Containerfile alike, then
    in the tables here and in `CLAUDE.md`, the Volume row among them: the
@@ -262,7 +266,10 @@ renamed for you. Then, in this order:
      `published: ghcr.io/divbast/frankenphp:<app>`;
    - `<app>` in the list that `TestRepositoryApps`, in
      `internal/appenv/appenv_test.go`, expects:
-     `[]string{"baikal", "librespeed"}`.
+     `[]string{"baikal", "librespeed"}`;
+   - frankenphp's README: a row for `:<app>` in its table of tags, and the
+     app's entry in its list of the C libraries each app builds that spc
+     takes from their newest release.
 
    Once that merges and `ghcr.io/divbast/frankenphp:<app>` is published,
    point the Containerfile's one `COPY --from=` at it by that digest. Until
@@ -274,15 +281,17 @@ renamed for you. Then, in this order:
    Confirm that the package is public. The run's last step pulls both tags
    as an anonymous client, and fails while the package is private; a
    package that starts private is made public in its settings, and the
-   button run again. **Then** add `slots` to `stall.yml`'s `checks`, and
-   `published: ghcr.io/divbast/<app>:latest` under its `with`, as
-   LibreSpeed's `stall.yml` does. In that order: until the image is
-   public, slots count every slot run since the repository was made as a
-   lost slot. Then rewrite what says the app rehearses: this README's
+   button run again. **Then** turn slots on in `stall.yml`: remove its
+   `checks` line, whose default runs all four checks, slots among them,
+   and add `published: ghcr.io/divbast/<app>:latest` under its `with`.
+   LibreSpeed's `stall.yml` is that shape: `published` alone. In that
+   order: until the image is public, slots count every slot run since the
+   repository was made as a lost slot. Then rewrite what says the app rehearses: this README's
    opening, "Running", where it says there is no published image, and
    "Publishing"; `CLAUDE.md`'s opening, where it says the app publishes
-   nothing to ghcr.io, and its bullet on the rehearsal; and the comments
-   above `rehearse` in `build.yml` and above `checks` in `stall.yml`.
+   nothing to ghcr.io, and its bullet on the rehearsal; and the comment
+   above `rehearse` in `build.yml`. The one above `checks` in `stall.yml`
+   goes with that line.
 9. **The organisation's profile.** Add the image's row to the table in
    divbast/.github's profile README.
 
