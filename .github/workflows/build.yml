@@ -39,7 +39,7 @@ concurrency:
 jobs:
   check:
     name: check
-    uses: divbast/ci/.github/workflows/app-check.yml@cfdd11b8cb9851e4a040220b0e46d978e75ee74f # v1.19.0
+    uses: divbast/ci/.github/workflows/app-check.yml@98d6302c61df9003bd4314c6f53ed7eb747d6c25 # v1.20.0
     permissions:
       contents: read
       attestations: read # verify the FrankenPHP binary
@@ -74,7 +74,7 @@ jobs:
     if: >-
       github.ref == 'refs/heads/main'
       && (github.event_name == 'schedule' || github.event_name == 'workflow_dispatch')
-    uses: divbast/ci/.github/workflows/app-publish.yml@cfdd11b8cb9851e4a040220b0e46d978e75ee74f # v1.19.0
+    uses: divbast/ci/.github/workflows/app-publish.yml@98d6302c61df9003bd4314c6f53ed7eb747d6c25 # v1.20.0
     with:
       image: ghcr.io/divbast/oci-image-template
       version-arg: TEMPLATE_VERSION
