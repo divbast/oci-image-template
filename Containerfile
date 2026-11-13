@@ -4,6 +4,10 @@
 # The app's own version, which tags the image: app-publish.yml reads it from
 # this line, by the name build.yml gives as version-arg
 ARG TEMPLATE_VERSION=0.1.0
+# No COPY --from= takes from the stage built from this. A stage that one
+# does take from must name its image inline: ci's carrier verification
+# refuses a COPY --from= of a stage whose image is an unresolved build
+# argument.
 ARG RUNTIME_IMAGE=gcr.io/distroless/cc-debian13:nonroot@sha256:cb87acc574abe719b6e5c547384defa2f7b1f24af9605d3f618cf852495d8be2
 
 FROM ${RUNTIME_IMAGE}

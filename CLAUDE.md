@@ -303,9 +303,11 @@ breaking change.
   check can never pass under looser settings than we ship. What CI proves
   is what ships. `TestContract` runs ci's contract suite against the image;
   `TestServes` asks for the page, and for two paths that must be 404s,
-  from the host, through a published port, on a fixed host port of its own
-  (18480), since the harness cannot read back one the engine picked. An app gives each thing it serves a test,
-  one topic per file, each on host ports of its own
+  from the host, through the app port published on loopback at a host
+  port the engine picks, which the test reads back from the container's
+  inspection (`harness.Inspect.Ports`), so no two tests or runs contend
+  for one. An app gives each thing it serves a test, one topic per file,
+  each publishing its ports the same way
 - **Go is modern and idiomatic, and linted strictly**, under ci's
   `go/golangci.yml`. Bash is for what is short and will stay so: the
   justfile's recipes. A check that runs inside a Containerfile build stage
