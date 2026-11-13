@@ -39,10 +39,11 @@ concurrency:
 jobs:
   check:
     name: check
-    uses: divbast/ci/.github/workflows/app-check.yml@58ed2348852e95ccafd91c06c61f963b19769c73 # v1.25.0
+    uses: divbast/ci/.github/workflows/app-check.yml@0a62aa8cfe2c68a0a44343d7a7693a68c06c2b3b # v2.0.0
     permissions:
       contents: read
       attestations: read # verify the FrankenPHP binary
+      packages: read # the scan asks GitHub whether the published image is absent or private
       security-events: write # code scanning, from main
 
   # The one check main's ruleset requires, so the job list can change without
@@ -74,7 +75,7 @@ jobs:
     if: >-
       github.ref == 'refs/heads/main'
       && (github.event_name == 'schedule' || github.event_name == 'workflow_dispatch')
-    uses: divbast/ci/.github/workflows/app-publish.yml@58ed2348852e95ccafd91c06c61f963b19769c73 # v1.25.0
+    uses: divbast/ci/.github/workflows/app-publish.yml@0a62aa8cfe2c68a0a44343d7a7693a68c06c2b3b # v2.0.0
     with:
       image: ghcr.io/divbast/oci-image-template
       version-arg: TEMPLATE_VERSION
@@ -82,7 +83,8 @@ jobs:
       # Decides against image, then pushes, attests and verifies in a
       # registry the job starts for itself, so nothing reaches ghcr.io. An
       # app made from this repository sets image to its own and removes
-      # this line: README.md's "Making a new app", step 8.
+      # this line, and divbast/ci v2 fails the job in any other repository
+      # that keeps it: README.md's "Making a new app", step 8.
       rehearse: true
     # Everything app-publish.yml's job asks for, rehearsing or not: a called
     # job that asks for more than its caller grants fails.

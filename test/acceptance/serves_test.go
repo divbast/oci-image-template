@@ -4,15 +4,10 @@
 package acceptance
 
 import (
-	"context"
-	"errors"
 	"fmt"
-	"io"
 	"net/http"
-	"strconv"
 	"strings"
 	"testing"
-	"time"
 
 	"github.com/divbast/ci/harness"
 )
@@ -21,13 +16,6 @@ import (
 // when FrankenPHP's server ran the script: Caddy serving the file as it
 // stands would answer its source, and php-cli would say cli.
 const page = "Hello from frankenphp\n"
-
-// serveWithin bounds how long a container may take to serve, and
-// attemptWithin each request while it waits.
-const (
-	serveWithin   = time.Minute
-	attemptWithin = 5 * time.Second
-)
 
 // refused are paths the app port must answer with a 404 that shows none
 // of the script: the script by its own name, which only / may run, and a
@@ -47,129 +35,37 @@ func TestServes(t *testing.T) {
 	e, image := underTest(t)
 	ctx := t.Context()
 
-	network, err := e.Network(ctx, t, "", "", false)
-	if err != nil {
-		t.Fatal(err)
-	}
-	c, err := e.Start(ctx, t, &harness.RunSpec{
-		Image:   image,
-		Network: network,
-		Confine: harness.Contract(tmpfsSize),
-		// On loopback, at a host port the engine picks and hostAddr reads
-		// back, so no other test or run can hold it first
-		Publish: []string{fmt.Sprintf("127.0.0.1::%d", appPort)},
+	s, err := e.Serve(ctx, t, &harness.ServeSpec{
+		Run: harness.RunSpec{
+			Image:   image,
+			Confine: harness.Contract(tmpfsSize),
+		},
+		AppPort: appPort,
 	})
-	if err != nil {
-		t.Fatal(err)
-	}
-	addr, err := hostAddr(ctx, c, appPort)
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	base := "http://" + addr
-	status, body, err := getWhenServing(ctx, c, base+"/")
 	checks := harness.NewChecks(t)
 	if err != nil {
 		checks.True("GET / from the host gets an answer", false, err.Error())
 		return
 	}
-	harness.Equal(checks, "GET / from the host answers 200", http.StatusOK, status)
-	harness.Equal(checks, "GET / from the host is exactly the page", page, body)
+
+	resp, err := s.Get(ctx, "/", nil)
+	harness.Answers(t, "GET / from the host answers 200", http.StatusOK, resp, err)
+	if err == nil {
+		harness.Equal(checks, "GET / from the host is exactly the page", page, string(resp.Body))
+	}
 
 	for _, path := range refused {
 		what := "GET " + path + " from the host"
-		status, body, err = get(ctx, base+path)
+		resp, err = s.Get(ctx, path, nil)
+		harness.Answers(t, what+" answers 404", http.StatusNotFound, resp, err)
 		if err != nil {
-			checks.True(what+" gets an answer", false, err.Error())
 			continue
 		}
-		harness.Equal(checks, what+" answers 404", http.StatusNotFound, status)
+		// Not harness.Lacks: the allowlist's catch-all is Caddy's respond
+		// 404, whose body is empty, and Lacks fails on a body with nothing
+		// in it to look through.
+		body := string(resp.Body)
 		checks.True(what+" shows none of the script", !strings.Contains(body, phpOpenTag),
-			fmt.Sprintf("%d bytes: %s", len(body), clip(body)))
+			fmt.Sprintf("%d bytes: %s", len(body), harness.Clip(body)))
 	}
-}
-
-// hostAddr returns where c's port is bound on the host, as ip:port, as the
-// engine reports it: the run leaves the host port to the engine, which
-// picks a free one.
-func hostAddr(ctx context.Context, c *harness.Container, port int) (string, error) {
-	ins, err := c.Inspect(ctx)
-	if err != nil {
-		return "", err
-	}
-	key := strconv.Itoa(port) + "/tcp"
-	addr, ok := ins.Ports[key]
-	if !ok {
-		return "", fmt.Errorf("container %s has no host port for %s: the engine reports %v", c, key, ins.Ports)
-	}
-	return addr, nil
-}
-
-// clipAt is as much of a body as a check quotes.
-const clipAt = 200
-
-// clip quotes body, cut short if it is long.
-func clip(body string) string {
-	if len(body) <= clipAt {
-		return strconv.Quote(body)
-	}
-	return fmt.Sprintf("%q... (%d bytes)", body[:clipAt], len(body))
-}
-
-// getWhenServing sends GET url from the host once a second until any
-// status comes back, and returns it and the body. A container that stops
-// first, or one still not serving after serveWithin, is an error carrying
-// its log, so a server that died says why.
-func getWhenServing(ctx context.Context, c *harness.Container, url string) (status int, body string, err error) {
-	deadline := time.Now().Add(serveWithin)
-	for {
-		status, body, err = get(ctx, url)
-		if err == nil {
-			return status, body, nil
-		}
-		ins, ierr := c.Inspect(ctx)
-		switch {
-		case ierr != nil:
-			return 0, "", fmt.Errorf("%w; and then: %w", err, ierr)
-		case !ins.State.Running:
-			return 0, "", withLog(ctx, c, fmt.Errorf("container %s stopped, exit status %d, before GET %s answered", c, ins.State.ExitCode, url))
-		case !time.Now().Before(deadline):
-			return 0, "", withLog(ctx, c, fmt.Errorf("GET %s got no answer within %s: %w", url, serveWithin, err))
-		}
-		select {
-		case <-ctx.Done():
-			return 0, "", ctx.Err()
-		case <-time.After(time.Second):
-		}
-	}
-}
-
-// get sends one GET url from the host, bounded by attemptWithin, and reads
-// the whole answer.
-func get(ctx context.Context, url string) (status int, body string, err error) {
-	ctx, cancel := context.WithTimeout(ctx, attemptWithin)
-	defer cancel()
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, http.NoBody)
-	if err != nil {
-		return 0, "", err
-	}
-	resp, err := harness.HostClient().Do(req)
-	if err != nil {
-		return 0, "", err
-	}
-	b, err := io.ReadAll(resp.Body)
-	if err = errors.Join(err, resp.Body.Close()); err != nil {
-		return 0, "", fmt.Errorf("GET %s: reading the answer: %w", url, err)
-	}
-	return resp.StatusCode, string(b), nil
-}
-
-// withLog adds c's log to err.
-func withLog(ctx context.Context, c *harness.Container, err error) error {
-	logs, lerr := c.Logs(ctx)
-	if lerr != nil {
-		return fmt.Errorf("%w; its log could not be read: %w", err, lerr)
-	}
-	return fmt.Errorf("%w; its log:\n%s", err, strings.TrimSpace(logs))
 }
