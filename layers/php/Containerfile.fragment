@@ -1,0 +1,47 @@
+# SPDX-License-Identifier: BSD-2-Clause
+# SPDX-FileCopyrightText: 2026 Aryan Ameri <github@aryan.ameri.coffee>
+
+# The template's PHP app, as Containerfile lines: what an app served by
+# FrankenPHP puts in the Containerfile in place of the Go app's. It is not
+# built here, and nothing here reads it but Renovate, which moves the
+# FrankenPHP digest below as it would in a Containerfile. README.md's
+# "Making a new app" says how each line goes into place, once layers/php's
+# files are moved to the repository's root.
+
+# In place of the Go runtime ARG: cc-debian13, since FrankenPHP links
+# against glibc. CI verifies its signature by the distroless project.
+ARG RUNTIME_IMAGE=gcr.io/distroless/cc-debian13:nonroot@sha256:cb87acc574abe719b6e5c547384defa2f7b1f24af9605d3f618cf852495d8be2
+
+# In place of the Go build stage and its COPY, in the runtime stage, after
+# FROM ${RUNTIME_IMAGE}. The binary divbast/frankenphp builds, by digest:
+# CI refuses it unless that repository's own build on main attested it.
+# Name the image here and nowhere else.
+COPY --from=ghcr.io/divbast/frankenphp:baikal@sha256:5e7a902e6407866a2bbecd1d9d5460039b9b4b29ced4628db471094aeb48f55e --chmod=0755 /frankenphp /usr/local/bin/frankenphp
+
+# Root-owned, and never written: everything that changes lives on /tmp. No
+# --chmod on these, because COPY gives a directory it creates the file's
+# mode, and then no one could enter it; they keep the checkout's modes.
+# The page, the one script :8080 runs
+COPY --chown=root:root public/index.php /var/www/template/index.php
+# /healthz, which the Caddyfile serves on :8081 alone
+COPY --chown=root:root rootfs/usr/local/share/template-health/index.php /usr/local/share/template-health/index.php
+COPY --chown=root:root caddy/Caddyfile /etc/frankenphp/Caddyfile
+# The binary scans /etc/frankenphp/php.d, so this applies to the server and
+# to every php-cli run alike
+COPY --chown=root:root php/template.ini /etc/frankenphp/php.d/template.ini
+COPY --chown=root:root --chmod=0755 rootfs/usr/local/bin/template-health /usr/local/bin/template-health
+
+# Caddy keeps its state and the configuration it autosaves under these
+ENV XDG_DATA_HOME=/tmp \
+    XDG_CONFIG_HOME=/tmp
+
+# In place of the Go app's HEALTHCHECK and ENTRYPOINT. --timeout must
+# clear template-health's own budget: it allows each of its two exchanges
+# 4 s and runs them one after the other. Podman reads no HEALTHCHECK from
+# an image published as an OCI index: its users pass the same array as
+# --health-cmd.
+HEALTHCHECK --interval=30s --timeout=10s --start-period=60s --retries=3 \
+    CMD ["/usr/local/bin/frankenphp", "php-cli", "/usr/local/bin/template-health"]
+USER 65532:65532
+# The server itself, as PID 1: frankenphp run --config, nothing before it
+ENTRYPOINT ["/usr/local/bin/frankenphp", "run", "--config", "/etc/frankenphp/Caddyfile"]
