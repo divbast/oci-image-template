@@ -4,32 +4,24 @@
 package acceptance
 
 import (
-	"fmt"
 	"net/http"
-	"strings"
 	"testing"
 
 	"github.com/divbast/ci/harness"
 )
 
-// page is exactly what GET / answers. PHP_SAPI in it is frankenphp only
-// when FrankenPHP's server ran the script: Caddy serving the file as it
-// stands would answer its source, and php-cli would say cli.
-const page = "Hello from frankenphp\n"
+// page is exactly what GET / answers.
+const page = "Hello from oci-image-template"
 
-// refused are paths the app port must answer with a 404 that shows none
-// of the script: the script by its own name, which only / may run, and a
-// path nothing names. A catch-all that fell through to a file server
-// would answer the first with the script's source.
-var refused = []string{"/index.php", "/nope"}
-
-// phpOpenTag starts the script's source, which no answer may carry.
-const phpOpenTag = "<?php"
+// refused are paths the app port must answer with a 404 and an empty
+// body: a PHP app's script by its own name, /healthz, which only the
+// health port serves, and a path nothing names.
+var refused = []string{"/index.php", "/healthz", "/nope"}
 
 // TestServes checks the app port, from a client outside the container,
 // through the published port: GET / answers 200 with exactly the page, and
-// every other path a 404 that shows none of the script, because the
-// Caddyfile's :8080 is an allowlist.
+// every other path a 404 with an empty body, because 8080 is an
+// allowlist.
 func TestServes(t *testing.T) {
 	t.Parallel()
 	e, image := underTest(t)
@@ -61,11 +53,6 @@ func TestServes(t *testing.T) {
 		if err != nil {
 			continue
 		}
-		// Not harness.Lacks: the allowlist's catch-all is Caddy's respond
-		// 404, whose body is empty, and Lacks fails on a body with nothing
-		// in it to look through.
-		body := string(resp.Body)
-		checks.True(what+" shows none of the script", !strings.Contains(body, phpOpenTag),
-			fmt.Sprintf("%d bytes: %s", len(body), harness.Clip(body)))
+		harness.Equal(checks, what+" has an empty body", "", string(resp.Body))
 	}
 }
