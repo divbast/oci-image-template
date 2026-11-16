@@ -40,9 +40,13 @@ jobs:
   check:
     name: check
     uses: divbast/ci/.github/workflows/app-check.yml@fdf31bbe82f14e314a269e820fe3c2a18b85aa2b # v3.0.0
+    with:
+      # PHPStan over the PHP layer: a Go app made from the template drops
+      # this with layers/php
+      php: true
     permissions:
       contents: read
-      attestations: read # verify the FrankenPHP binary
+      attestations: read # verify the attestations of the images the Containerfile builds from
       packages: read # the scan asks GitHub whether the published image is absent or private
       security-events: write # code scanning, from main
 
