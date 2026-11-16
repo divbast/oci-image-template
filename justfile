@@ -27,13 +27,14 @@ import? '.ci/just/app.just'
 default:
     @just --list
 
-# Fetch divbast/ci at the commit the workflows pin, then install the toolchain
+# Fetch divbast/ci at the commit the workflows pin, then install the toolchain,
+# and PHPStan for the PHP layer
 setup: ci-checkout
     #!/usr/bin/env bash
     # Not through the mise exec shell: this is what installs what it runs
     set -euo pipefail
     mise install
-    composer install
+    composer install --working-dir=layers/php
 
 # Fetch divbast/ci at the commit the workflows pin, into .ci, and nothing else
 ci-checkout:
@@ -62,7 +63,7 @@ ci-checkout:
 # Every lint gate. Needs a running Docker daemon, for docker build --check
 lint:
     {{ just_executable() }} ci-fresh actions-check workflow-audit actionlint shell-lint go-lint go-test reuse-lint app-lint
-    vendor/bin/phpstan analyse --no-progress
+    layers/php/vendor/bin/phpstan analyse -c layers/php/phpstan.neon --no-progress
 
 # Every gate. Run before committing
 ci:

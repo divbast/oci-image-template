@@ -3,6 +3,8 @@
 
 .ci/
 vendor/
+# The PHP layer, which no build of this image copies
+layers/
 .agents/
 .superpowers/
 .git/

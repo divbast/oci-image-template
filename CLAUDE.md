@@ -3,20 +3,23 @@
 
 # oci-image-template
 
-A minimal working divbast app: one PHP page served by FrankenPHP, in a
-container image that runs at zero Linux capabilities on a read-only root
-filesystem as a non-root user. Every new divbast image repository is made
-from it, by its entry in `divbast/infra`, and then changed as the README's
-"Making a new app" says, in that order.
+A minimal working divbast app: one page served by a stdlib Go server, in a
+container image that runs at zero Linux capabilities, with no new
+privileges, on a read-only root filesystem as a non-root user. Every new
+divbast image repository is made from it, by its entry in `divbast/infra`,
+and then changed as the README's "Making a new app" says, in that order:
+a Go app keeps the Go core, and a PHP app moves the PHP layer,
+`layers/php`, into place.
 
 It publishes nothing to ghcr.io: its publish job rehearses. The divbast
 organisation's settings, rulesets and Renovate wiring live in
 `divbast/infra`.
 
-What makes the image this app's lives here: the Containerfile, the Caddy
-and PHP configuration, the page, the health probe and endpoint, and the
-acceptance tests. The pipeline around it is shared, and reaches this
-repository at a pinned commit:
+What makes the image this app's lives here: the Containerfile, the app
+(`cmd/template`, `internal/server`), and the acceptance tests, beside the
+PHP layer: its Containerfile fragment, Caddy and PHP configuration, page,
+and health probe and endpoint. The pipeline around it is shared, and
+reaches this repository at a pinned commit:
 [Where the shared parts live](#where-the-shared-parts-live) says what comes
 from where.
 
@@ -56,24 +59,26 @@ breaking change.
 | Property | Value |
 |---|---|
 | Capabilities | **none** (`--cap-drop ALL`) |
+| Privileges | **no new ones** (`--security-opt no-new-privileges`), under the engine's **seccomp** filter |
 | Root filesystem | **read-only** |
 | User | uid/gid **65532**, never root |
 | Listen port | **8080** for the page — never 80 |
 | Health port | **8081** — health only, never serves the page, meant to stay unpublished |
-| Other listeners | **none**: Caddy's admin API is **off** (`admin off`) |
-| tmpfs required | exactly one: `/tmp`, at **16 MiB** |
+| Other listeners | **none** |
+| tmpfs required | exactly one: `/tmp`, at **16 MiB**, `noexec,nosuid,nodev` |
+| Writable mounts | `/tmp` alone, and nothing written can run; on Podman, `--read-only-tmpfs=false` |
 | Volume | **none** |
 | Outbound network | **none** |
 | Shell, package manager | **none** |
-| Processes | **one tree**, FrankenPHP as PID 1: `frankenphp run --config /etc/frankenphp/Caddyfile` |
-| Healthy | the shipped probe: `/healthz` **200** and loopback `GET /` **exactly** `Hello from frankenphp` |
+| Processes | **one**, the app as PID 1: `template serve` |
+| Healthy | the shipped probe, `template health`: `/healthz` **200** and loopback `GET /` **exactly** `Hello from oci-image-template` |
 | Engine healthcheck | Docker runs it automatically. **Podman does not** — pass `--health-cmd` yourself |
 
 - **Podman never sees this image's `HEALTHCHECK`.** Its `libimage` reads a
   healthcheck only from a Docker-media-type manifest; divbast images publish
   as an OCI index, so Podman's OCI inspection branch never reaches the
   config's healthcheck field — no version of Podman does. Give Podman users
-  `--health-cmd '["/usr/local/bin/frankenphp","php-cli","/usr/local/bin/template-health"]'`
+  `--health-cmd '["/usr/local/bin/template","health"]'`
   (a Quadlet's `HealthCmd=` takes the same value) — no leading `"CMD"`,
   because Podman before 5.8.0 re-splits such an array into one token instead
   of running it. Tracked upstream as podman/podman#25454 and #18904. The
@@ -81,41 +86,37 @@ breaking change.
   form, and has each engine judge the container: Docker by the image's
   `HEALTHCHECK`, Podman by the same array passed as `--health-cmd`
 - **The shipped probe asserts two halves, and neither implies the other.**
-  `/healthz` on 8081 checks `ini` from inside the server, but never goes
-  through 8080's routes. Only the page's exact answer proves Caddy routes
-  `/` to PHP and FrankenPHP's server runs it: `PHP_SAPI` in it reads
-  `frankenphp` only there. Anything checking this image should run the
-  probe rather than reimplement either half. It prints nothing when
-  healthy, which the contract's `health-probe` check asserts; each 503 line
-  is `<check>: <reason>` and the probe relays it: with no shell and no
-  access log on 8081, the engine's health log is the only record of why
-- **8080 is an allowlist.** It serves `/`, which the Caddyfile rewrites to
-  `index.php`, and answers 404 with an empty body to everything else,
-  `/index.php` and `/healthz` included. `TestServes` asks for `/index.php`
-  and a path nothing names, and fails on any answer but a 404, or one that
-  carries the script's source, as a catch-all handed to `file_server`
-  would. **No `php_server`**: it hands every path it finds no file for to
-  `index.php`, so `/healthz` on 8080 would answer 200, and the contract's
-  `health-port-only` check fails on that. Every route is a `handle` block,
-  because Caddy sorts a bare directive after the catch-all 404
-- **Nothing listens but 8080 and 8081.** Caddy's admin API would otherwise
-  listen on 127.0.0.1:2019 and take a new config, with no credentials, from
-  anything sharing the container's network: under host networking, every
-  process on the host. The contract suite reads the kernel's socket tables
-  and fails on any other TCP port a process in the container listens on,
-  and on any UDP socket one holds
-- **One process tree, always.** FrankenPHP is a single binary containing PHP
-  and Caddy, and it is the ENTRYPOINT, so it is PID 1. Nothing runs before
-  it: the app has no state to prepare and no environment to read. An app
-  that needs a bootstrap `pcntl_exec`s the same argv from it, as
-  LibreSpeed's does. Do not add a supervisor, s6, or a second long-running
-  process
-- **Zero egress.** `allow_url_fopen` is off, and `/healthz` fails if the
-  server runs with it on. The contract suite proves the image serves and is
-  healthy on a genuinely `--internal` network, and cannot connect out
+  `/healthz` on 8081 shows the server runs, but never goes through 8080's
+  routes. Only the page's exact answer proves the app port serves the app.
+  Anything checking this image should run the probe rather than
+  reimplement either half. It prints nothing when healthy, which the
+  contract's `health-probe` check asserts; each failure is a line,
+  `<check>: <reason>`: with no shell, the engine's health log is the only
+  record of why
+- **8080 is an allowlist.** It serves `/`, and answers 404 with an empty
+  body to everything else, `/index.php` and `/healthz` included, and so
+  does 8081 to all but `/healthz`. `TestServes` asks for `/index.php`,
+  `/healthz` and a path nothing names, and fails on any answer but an
+  empty 404; the contract's `health-port-only` check fails on `/healthz`
+  answering on 8080
+- **Nothing listens but 8080 and 8081.** The contract suite reads the
+  kernel's socket tables and fails on any other TCP port a process in the
+  container listens on, and on any UDP socket one holds
+- **One process, always, and it stops when told.** The app is the
+  ENTRYPOINT, so it is PID 1. Nothing runs before it: it has no state to
+  prepare and no environment to read. The kernel drops a signal PID 1 does
+  not handle, so the app handles SIGTERM and SIGINT itself, finishes what
+  it is answering within 5 s and exits 0; `TestStopsPromptly` fails on a
+  stop that takes longer, or any other exit. Do not add a supervisor or a
+  second long-running process
+- **Zero egress.** The app opens no connection out. The contract suite
+  proves the image serves and is healthy on a genuinely `--internal`
+  network, and cannot connect out
 - **Nothing may add a shell or a package manager to the final image.** The
-  base is distroless; that is the point. What it removes is us running apt,
-  not the patching itself - `cc-debian13` still ships libc6, libssl3t64,
+  base is distroless; that is the point, and the contract's `no-shell` and
+  `no-package-manager` checks hold it there. What it removes is us running
+  apt, not the patching itself: `static-debian13` ships CA certificates and
+  time zones, and the PHP layer's `cc-debian13` libc6, libssl3t64,
   libstdc++6, libgcc-s1, libgomp1, libzstd1 and zlib1g, all executable code
   that takes CVEs. That obligation moves to the base image's own rebuilds —
   and **nothing in this repository collects them on its own.** Rebuilding
@@ -146,30 +147,52 @@ breaking change.
   should have published. An app made from the template turns both around
   in the README's step 8, and in its order: `slots` go on only once the
   app's first image is public
-- **The FrankenPHP binary is divbast/frankenphp's, by digest.** The runtime
-  stage copies it from `ghcr.io/divbast/frankenphp:baikal@sha256:…`, the
+- **Every image the Containerfile builds from is verified first.** Before
+  `app-check.yml` builds anything, `divbast-verify-images` refuses any image
+  not pinned as `<name>:<tag>@sha256:<digest>`, and verifies the distroless
+  runtime's cosign signature by the distroless project; the `golang`
+  builder is held by its digest alone. A local `just build` does not
+  verify; `just ci-tools && .ci/bin/divbast-verify-images` does, with
+  cosign from `mise.toml`
+- **The binary must never carry a file capability.** A binary with a file
+  capability cannot be exec'd at all under `--cap-drop ALL` — it dies with
+  `Operation not permitted` and exit 126 — and the contract suite's
+  `file-capability` check, which runs `template version`, fails on one, as
+  `no-file-capability-xattr` fails on one anywhere in the image
+- **The application is one root-owned file, never written.** The binary
+  is `COPY`'d from the build stage, and the app writes nothing, not even to
+  `/tmp`
+
+### The PHP layer
+
+`layers/php` is the template's PHP app, kept for a PHP app to move into
+place: it is linted (PHPStan from `layers/php/composer.lock`, REUSE,
+ShellCheck) but never built. `Containerfile.fragment` holds the lines that
+build it, which Renovate's dockerfile manager reads by its name. Once in
+place, these hold of it, as they do of Baikal and LibreSpeed:
+
+- **The FrankenPHP binary is divbast/frankenphp's, by digest.** The
+  fragment copies it from `ghcr.io/divbast/frankenphp:baikal@sha256:…`, the
   binary built for the Baikal image: the page needs only core PHP, so any
-  of divbast/frankenphp's binaries would do. Before `app-check.yml` builds
-  anything, `divbast-verify-frankenphp` has gh verify that frankenphp's own
-  `build.yml`, on its main, attested that digest. It counts every mention
-  of the image in the Containerfile's instructions, wherever it stands, and
-  refuses all but exactly one, that `COPY`'s `--from=`: never name the
-  image in an `ARG`, a `LABEL` or a `RUN`. A local `just build` does not
-  verify; `just ci-tools && .ci/bin/divbast-verify-frankenphp` does.
-  Renovate moves the digest when frankenphp publishes a new `:baikal`
-- **The binary must never carry a file capability.** The official FrankenPHP build
-  carries `cap_net_bind_service=ep`, and a binary with a file capability cannot be
-  exec'd at all under `--cap-drop ALL` — it dies with `Operation not permitted`
-  and exit 126 before PHP starts. divbast/frankenphp refuses to publish a
-  binary that carries one, and the contract suite's `file-capability` check
-  fails on one
-- **The application tree stays root-owned and unwritten.** Everything that
-  changes lives on `/tmp`: Caddy's own state, in `/tmp/caddy`, through
-  `XDG_DATA_HOME` and `XDG_CONFIG_HOME`. The Containerfile copies each file
-  with no `--chmod`, because `COPY --chmod` gives a directory it creates the
-  file's mode, and a directory of mode 0644 cannot be entered; the files
-  keep the checkout's modes, and the acceptance suite fails on one uid
-  65532 cannot read
+  of divbast/frankenphp's binaries would do. `divbast-verify-images` has
+  gh verify that frankenphp's own `build.yml`, on its main, attested that
+  digest, and refuses the image named anywhere but that `COPY`'s
+  `--from=`: never in an `ARG`, a `LABEL` or a `RUN`. Upstream's own build
+  carries `cap_net_bind_service=ep`, which divbast/frankenphp refuses to
+  publish
+- **8080 is an allowlist in the Caddyfile.** **No `php_server`**: it hands
+  every path it finds no file for to `index.php`, so `/healthz` on 8080
+  would answer 200. Every route is a `handle` block, because Caddy sorts a
+  bare directive after the catch-all 404, and Caddy's admin API is off
+  (`admin off`)
+- **`/healthz` checks `ini`** from inside the server, and the page's
+  `PHP_SAPI` reads `frankenphp` only when FrankenPHP's server ran it.
+  `allow_url_fopen` is off
+- **The application tree stays root-owned and unwritten.** Caddy's own
+  state lives in `/tmp/caddy`, through `XDG_DATA_HOME` and
+  `XDG_CONFIG_HOME`. The fragment copies each file with no `--chmod`,
+  because `COPY --chmod` gives a directory it creates the file's mode, and
+  a directory of mode 0644 cannot be entered
 
 ## Where the shared parts live
 
@@ -178,7 +201,7 @@ breaking change.
   at: a release's full SHA, with its tag as the comment. Its README is the
   reference for all of it:
   - the reusable workflows: `app-check.yml` (lint; the image built for
-    amd64 and arm64 once the binary's attestation verifies; the acceptance
+    amd64 and arm64 once every image it builds from verifies; the acceptance
     suite on each under Docker and rootless Podman; the scan),
     `app-publish.yml` (the daily slot and the button only: push, index,
     attest, verify, then tag and check as an anonymous client pulls it;
@@ -190,7 +213,7 @@ breaking change.
     `.ci/just/app.just`. Recipes here call them from a recipe's body, never
     as a dependency, so the justfile still parses before `.ci` exists;
   - the Go tools, which `just ci-tools` builds into `.ci/bin/`, run from
-    this repository's root: `divbast-pin`, `divbast-verify-frankenphp`,
+    this repository's root: `divbast-pin`, `divbast-verify-images`,
     `divbast-scan`, `divbast-testcount`, `divbast-published-revision`,
     `divbast-publish-decision`, `divbast-stall` and the rest;
   - the acceptance `harness` and the `contract` suite, which `go.mod`
@@ -202,7 +225,7 @@ breaking change.
   moves every pin of it at once. `just setup`, and the pin check
   (`divbast-pin`) in each ci workflow that runs this repository's code,
   refuse workflows that call ci at more than one commit
-- **divbast/frankenphp** builds and attests the binary,
+- **divbast/frankenphp** builds and attests the PHP layer's binary,
   `ghcr.io/divbast/frankenphp:baikal`, with its pins and the in-build
   checks on them
 - **divbast/renovate-config** holds the presets `renovate.json` extends.
@@ -215,12 +238,12 @@ breaking change.
 ## Key commands
 
 - `just setup` — fetch divbast/ci into `.ci/` at the commit the workflows
-  pin, then install the pinned toolchain and PHPStan. One command on a
+  pin, then install the pinned toolchain, and PHPStan for the PHP layer. One command on a
   fresh clone, and again whenever the pin moves; `just lint` fails, naming
   it, when `.ci` is not at the pinned commit (`ci-fresh`)
-- `just build` — build the image locally. It does not verify the binary's
-  attestation; `just ci-tools && .ci/bin/divbast-verify-frankenphp` does,
-  with gh 2.102.0 or newer
+- `just build` — build the image locally. It does not verify the images it
+  builds from; `just ci-tools && .ci/bin/divbast-verify-images` does, with
+  cosign from `mise.toml`
 - `just acceptance` — `go test ./test/acceptance/...` against the image
   `just build` wrote, under `ENGINE` (docker unless it says podman),
   through `divbast-testcount`, which fails the run unless a test passed and
@@ -231,7 +254,7 @@ breaking change.
 - `just lint` — pinact, zizmor, actionlint, ShellCheck and shfmt, the Go
   gates (the compiler, `go vet`, `go fix -diff`, `go mod tidy -diff`,
   `golangci-lint fmt --diff` and `golangci-lint run`), `go-test`, `reuse
-  lint`, hadolint, `docker build --check` and PHPStan. `go-test` runs every
+  lint`, hadolint, `docker build --check` and PHPStan over the PHP layer. `go-test` runs every
   Go test under the race detector; the acceptance suite skips there, since
   `IMAGE` is unset
 - `just archive`, `just scan` — write the image as an OCI archive, then run
@@ -243,18 +266,19 @@ breaking change.
 ## Where the toolchain comes from
 
 - **`mise.toml` is where tool versions are written.** Go, golangci-lint,
-  hadolint, ShellCheck, shfmt, actionlint, reuse, just, pinact, trivy and
-  zizmor are all listed there. Every justfile recipe but `setup`, which
+  hadolint, ShellCheck, shfmt, actionlint, reuse, just, pinact, trivy,
+  zizmor and cosign are all listed there. Every justfile recipe but `setup`, which
   installs them, runs through `mise exec`, so a recipe resolves those
   binaries and not a same-named one on PATH. The recipes that call GitHub,
   pinact's and zizmor's, take a fine-grained token from `GITHUB_TOKEN` and
   nothing else, as divbast/ci's README says; CI passes its own
 - **Go builds with the toolchain mise installs and nothing else.**
   `GOTOOLCHAIN=local` keeps `go.mod`'s line from downloading another. And
-  `GOFLAGS=-mod=readonly`, because Composer's `vendor/` sits at the module
-  root, where Go would take it for a Go vendor directory once `go.mod` has a
-  `require`, and refuse to build; readonly is the default outside vendor
-  mode, and still refuses to edit `go.mod`
+  `GOFLAGS=-mod=readonly`, because a PHP app made from the template keeps
+  Composer's `vendor/` at the module root, where Go would take it for a Go
+  vendor directory once `go.mod` has a `require`, and refuse to build;
+  readonly is the default outside vendor mode, and still refuses to edit
+  `go.mod`
 - **`just lint` needs a running Docker daemon**, for `docker build --check`.
   `--check` is a buildx flag with no podman equivalent, so this one gate does
   not honour `ENGINE` and does not run without dockerd
@@ -264,15 +288,15 @@ breaking change.
 - **PHP is a deliberate exception.** `php` and
   `composer` come from the host, not from mise: mise's only PHP backend
   compiles PHP from source, which is minutes added to every CI run in order to
-  analyse a handful of files. PHPStan is therefore pinned by `composer.lock`,
-  and `phpstan.neon` sets `phpVersion` so the *analysis target* is fixed no
-  matter which PHP runs the analyser
-- **So this repository carries `composer.json`, `composer.lock` and a
-  `vendor/`, and that deserves an explanation**, because the image's whole
+  analyse a handful of files. PHPStan is therefore pinned by the PHP layer's
+  `composer.lock`, and its `phpstan.neon` sets `phpVersion` so the
+  *analysis target* is fixed no matter which PHP runs the analyser
+- **So the PHP layer carries `composer.json`, `composer.lock` and a
+  `vendor/`, and that deserves an explanation**, because a PHP image's whole
   claim is that no PHP toolchain reaches it. None of it does. The Containerfile
   copies named paths and never the build context, `vendor/` is gitignored, and
-  `.dockerignore` excludes it too so that a `COPY` written broadly at some
-  later date cannot quietly change the answer. `composer.json` has no `require`
+  `.dockerignore` excludes it, and the whole of `layers/`, so that a `COPY`
+  written broadly at some later date cannot quietly change the answer. `composer.json` has no `require`
   section, no `autoload` and no package name on purpose: Composer is asked to
   install a linter here, not to make this a PHP project
 - Licensing for `composer.json`, `composer.lock` and `renovate.json` lives in
@@ -308,10 +332,11 @@ breaking change.
   upstream's licence to the label and the README together
 - **The acceptance suite is Go, on divbast/ci's harness.** Every
   container it starts runs under `harness.Contract("16m")`, the *exact*
-  confinement the contract claims, `--tmpfs /tmp:size=16m` included, so a
+  confinement the contract claims, `--security-opt no-new-privileges` and
+  `--tmpfs /tmp:size=16m,noexec,nosuid,nodev` included, so a
   check can never pass under looser settings than we ship. What CI proves
   is what ships. `TestContract` runs ci's contract suite against the image;
-  `TestServes` is the template's one test of its own. Each serves through
+  `TestServes` and `TestStopsPromptly` are the template's own. Each serves through
   the harness's `Serve` (or `StartServing`, for a container that must be
   started apart from its first request), which publishes on the host's
   loopback at ports the engine picks, so no two tests, or two suites on one

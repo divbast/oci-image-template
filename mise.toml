@@ -15,12 +15,16 @@
 "aqua:suzuki-shunsuke/pinact" = "5.0.2"
 "aqua:aquasecurity/trivy" = "0.76.2"
 "aqua:zizmorcore/zizmor" = "1.32.0"
+# For divbast-verify-images, which app-check.yml's build job runs: it
+# verifies the distroless runtime's signature
+"aqua:sigstore/cosign" = "3.1.4"
 
 [env]
 # The toolchain is the one pinned above, never one go.mod's toolchain line
 # would download
 GOTOOLCHAIN = "local"
-# Composer's vendor/ sits at the module root, so with a require in go.mod Go
-# would take it for a Go vendor directory and refuse to build. readonly is
-# the default outside vendor mode, and still refuses to edit go.mod.
+# A PHP app made from the template keeps Composer's vendor/ at the module
+# root, and with a require in go.mod Go would take it for a Go vendor
+# directory and refuse to build. readonly is the default outside vendor
+# mode, and still refuses to edit go.mod.
 GOFLAGS = "-mod=readonly"
