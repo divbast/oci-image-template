@@ -322,7 +322,7 @@ renamed for you. Then, in this order:
    `ghcr.io/divbast/<app>` and remove `rehearse: true`. Do this once the app
    is ready to publish, not before: it is what lets the first image reach
    `ghcr.io/divbast/<app>` and creates the package. Until then each daily
-   slot's publish job fails by design, because divbast/ci v2 rehearses only
+   slot's publish job fails by design, because divbast/ci rehearses only
    in `divbast/oci-image-template`, so a repository made from the template
    that keeps `rehearse: true` goes red at its publish job. Once that is on
    `main`, publish once by the button: run `build` from `main` by hand.
