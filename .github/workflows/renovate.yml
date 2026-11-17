@@ -41,7 +41,7 @@ permissions: {}
 jobs:
   renovate:
     name: renovate
-    uses: divbast/ci/.github/workflows/renovate.yml@49ce84b2928d5b04faf37608f088c0c8fc49a803 # v3.1.0
+    uses: divbast/ci/.github/workflows/renovate.yml@c200227c30efd689700a70af2ce2b4010e27ff11 # v3.6.0
     with:
       automerge: ${{ vars.OCI_IMAGE_TEMPLATE_AUTOMERGE == 'enabled' }}
     # The App's key lives in this repository's `renovate` environment, and a
