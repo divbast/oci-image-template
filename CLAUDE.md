@@ -168,8 +168,13 @@ breaking change.
 `layers/php` is the template's PHP app, kept for a PHP app to move into
 place: it is linted (PHPStan from `layers/php/composer.lock`, REUSE,
 ShellCheck) but never built. `Containerfile.fragment` holds the lines that
-build it, which Renovate's dockerfile manager reads by its name. Once in
-place, these hold of it, as they do of Baikal and LibreSpeed:
+build it, which Renovate's dockerfile manager reads by its name. That
+manager reads an `ARG` only where a `FROM` uses it, so every image a
+fragment pins sits where a `FROM` or a `COPY --from=` uses it: hence the
+fragment's `FROM ${RUNTIME_IMAGE}`, which the Containerfile has already.
+A layer added for another stack keeps to the same rule, and
+`renovate.json` stays out of it. Once in place, these hold of it, as they
+do of Baikal and LibreSpeed:
 
 - **The FrankenPHP binary is divbast/frankenphp's, by digest.** The
   fragment copies it from `ghcr.io/divbast/frankenphp:baikal@sha256:…`, the

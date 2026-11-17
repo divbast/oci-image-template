@@ -12,6 +12,11 @@
 # against glibc. CI verifies its signature by the distroless project.
 ARG RUNTIME_IMAGE=gcr.io/distroless/cc-debian13:nonroot@sha256:cb87acc574abe719b6e5c547384defa2f7b1f24af9605d3f618cf852495d8be2
 
+# The runtime stage's FROM, which the Containerfile has already. It stands
+# here because Renovate's dockerfile manager reads an ARG only where a
+# FROM uses it, and so moves the digest above.
+FROM ${RUNTIME_IMAGE}
+
 # In place of the Go build stage and its COPY, in the runtime stage, after
 # FROM ${RUNTIME_IMAGE}. The binary divbast/frankenphp builds, by digest:
 # CI refuses it unless that repository's own build on main attested it.

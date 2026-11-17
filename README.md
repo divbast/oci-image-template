@@ -183,7 +183,8 @@ are:
   moves the builder's tag and digest. A new distroless image arrives as one
   that moves its digest, and CI verifies its signature before it builds.
 - A new `:baikal` binary arrives as a pull request that moves the PHP
-  layer's digest.
+  layer's digest, and a new `cc-debian13` image as one that moves the PHP
+  layer's runtime digest.
 - A release of divbast/ci arrives as one pull request that moves every
   workflow's pin of it together.
 - The toolchain in `mise.toml` and PHPStan in `layers/php/composer.lock`
@@ -227,7 +228,9 @@ renamed for you. Then, in this order:
      `internal/` and `layers/`. In the Containerfile, the fragment's lines
      replace the Go app's, each where its comment says: the
      `RUNTIME_IMAGE` `ARG`, the build stage and the `COPY` from it, the
-     `HEALTHCHECK` and the `ENTRYPOINT`. The justfile's `setup` and
+     `HEALTHCHECK` and the `ENTRYPOINT`. Its `FROM ${RUNTIME_IMAGE}` is
+     the Containerfile's own, already there, which stands in the fragment
+     for Renovate alone. The justfile's `setup` and
      `lint` go back to `composer install` and
      `vendor/bin/phpstan analyse --no-progress` at the root.
      `test/acceptance/contract_test.go`'s `PID1`, `HealthCmd` and `Exec`
