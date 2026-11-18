@@ -17,6 +17,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"testing"
 )
@@ -328,6 +329,72 @@ func TestUsage(t *testing.T) {
 				t.Errorf("stderr is %q, want one usage line", r.stderr)
 			}
 		})
+	}
+}
+
+// TestContainerfileRunsIt fails unless the Containerfile copies the script
+// in and runs it over /out/bin, against the RUNTIME_IMAGE its stage
+// declares, after every RUN in that stage that names /out/bin, as any RUN
+// that writes there must: the check has to read what the runtime stage
+// copies, and an ARG with no default of its own takes the one the runtime
+// stage is built FROM.
+func TestContainerfileRunsIt(t *testing.T) {
+	t.Parallel()
+
+	root, err := os.OpenRoot(filepath.Join("..", ".."))
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = root.Close() })
+	data, err := root.ReadFile("Containerfile")
+	if err != nil {
+		t.Fatal(err)
+	}
+	containerfile := string(data)
+
+	copied := regexp.MustCompile(`(?m)^COPY test/runtime-major\.sh (\S+)$`).FindStringSubmatchIndex(containerfile)
+	if copied == nil {
+		t.Fatal("the Containerfile does not COPY test/runtime-major.sh into a build stage")
+	}
+	dst := containerfile[copied[2]:copied[3]]
+	want := `RUN ` + dst + ` /out/bin "${RUNTIME_IMAGE}"`
+	ran := regexp.MustCompile(`(?m)^` + regexp.QuoteMeta(want) + `$`).FindStringIndex(containerfile)
+	if ran == nil {
+		t.Fatalf("the Containerfile copies the script to %s but never runs %s, alone on its line", dst, want)
+	}
+	if ran[0] < copied[0] {
+		t.Errorf("the Containerfile runs %s before it copies the script there", dst)
+	}
+
+	// The check's stage, from the last FROM before it to the next
+	start, end := -1, len(containerfile)
+	for _, from := range regexp.MustCompile(`(?m)^FROM `).FindAllStringIndex(containerfile, -1) {
+		if from[0] > ran[0] {
+			end = from[0]
+			break
+		}
+		start = from[0]
+	}
+	if start < 0 {
+		t.Fatal("the Containerfile runs the check before any FROM")
+	}
+	stage, at := containerfile[start:end], ran[0]-start
+
+	if arg := regexp.MustCompile(`(?m)^ARG (\S+ )*RUNTIME_IMAGE( \S+)*$`).FindStringIndex(stage); len(arg) == 0 || arg[0] > at {
+		t.Error("the check's stage declares no ARG RUNTIME_IMAGE, without a default of its own, before the check, which would then read another image or none")
+	}
+	wrote := false
+	for _, run := range regexp.MustCompile(`(?m)^RUN (?:.*\\\n)*.*$`).FindAllStringIndex(stage, -1) {
+		switch {
+		case run[0] == at || !strings.Contains(stage[run[0]:run[1]], "/out/bin"):
+		case run[0] > at:
+			t.Errorf("a RUN after the check names /out/bin, so what ships may not be what it checked:\n%s", stage[run[0]:run[1]])
+		default:
+			wrote = true
+		}
+	}
+	if !wrote {
+		t.Error("no RUN before the check in its stage names /out/bin, so nothing it checks was published there")
 	}
 }
 

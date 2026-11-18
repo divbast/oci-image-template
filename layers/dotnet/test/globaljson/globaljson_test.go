@@ -17,6 +17,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"testing"
 )
@@ -315,6 +316,46 @@ func TestUsage(t *testing.T) {
 	}
 	if got := read(t, file); got != upstream {
 		t.Errorf("a usage error changed a file it was given: it holds %q", got)
+	}
+}
+
+// TestContainerfileRunsIt fails unless the Containerfile copies the script
+// in and runs it over global.json, against the SDK the stage's image
+// reports from /, where no global.json is in the way, before the first
+// dotnet command, which is the first thing that reads global.json.
+func TestContainerfileRunsIt(t *testing.T) {
+	t.Parallel()
+
+	root, err := os.OpenRoot(filepath.Join("..", ".."))
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = root.Close() })
+	data, err := root.ReadFile("Containerfile")
+	if err != nil {
+		t.Fatal(err)
+	}
+	containerfile := string(data)
+
+	copied := regexp.MustCompile(`(?m)^COPY test/global-json\.sh (\S+)$`).FindStringSubmatchIndex(containerfile)
+	if copied == nil {
+		t.Fatal("the Containerfile does not COPY test/global-json.sh into a build stage")
+	}
+	dst := containerfile[copied[2]:copied[3]]
+	want := `RUN sdk=$(cd / && dotnet --version); ` + dst + ` global.json "${sdk}"`
+	ran := regexp.MustCompile(`(?m)^` + regexp.QuoteMeta(want) + `$`).FindStringIndex(containerfile)
+	if ran == nil {
+		t.Fatalf("the Containerfile copies the script to %s but never runs %s", dst, want)
+	}
+	if ran[0] < copied[0] {
+		t.Errorf("the Containerfile runs %s before it copies the script there", dst)
+	}
+	dotnet := regexp.MustCompile(`(?m)^RUN (--\S+ )*dotnet `).FindStringIndex(containerfile)
+	if dotnet == nil {
+		t.Fatal("the Containerfile runs no dotnet command, so this test no longer knows what must follow the check")
+	}
+	if ran[0] > dotnet[0] {
+		t.Error("the Containerfile runs dotnet before it checks and rewrites global.json")
 	}
 }
 

@@ -61,9 +61,32 @@ ci-checkout:
     git -C .ci checkout -q FETCH_HEAD && rm -rf .ci/bin
 
 # Every lint gate. Needs a running Docker daemon, for docker build --check
+# and the .NET layer's lint, logged in to dhi.io for that layer's images
 lint:
     {{ just_executable() }} ci-fresh actions-check workflow-audit actionlint shell-lint go-lint go-test reuse-lint app-lint
     layers/php/vendor/bin/phpstan analyse -c layers/php/phpstan.neon --no-progress
+    {{ just_executable() }} dotnet-lint
+    hadolint layers/dotnet/Containerfile
+    docker build --check -f layers/dotnet/Containerfile layers/dotnet
+
+# The .NET layer's demo, formatted as dotnet format would leave it and built
+# with every warning an error, in the SDK image the layer's backend stage
+# pins and CI verifies: one SDK pin, and none in mise. The demo is mounted
+# read-only and linted in a copy under /tmp, so nothing is written to the
+# checkout, offline, since it restores nothing. Docker whatever ENGINE says,
+# since the dhi.io login is Docker's
+dotnet-lint:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    file=layers/dotnet/Containerfile
+    image=$(sed -nE 's/^FROM[[:space:]]+([^[:space:]]+)[[:space:]]+AS[[:space:]]+backend[[:space:]]*$/\1/p' "${file}")
+    if [[ -z "${image}" || "${image}" == *$'\n'* ]]; then
+        echo "dotnet-lint: ${file} has no one 'FROM <image> AS backend' line to take the SDK image from" >&2
+        exit 1
+    fi
+    docker run --rm --network=none -e DOTNET_CLI_TELEMETRY_OPTOUT=1 -e DOTNET_NOLOGO=1 \
+        -v "${PWD}/layers/dotnet/src:/src:ro" --entrypoint bash "${image}" -euo pipefail -c \
+        'cp -R /src /tmp/src; cd /tmp/src/Template; dotnet format --verify-no-changes; dotnet build -warnaserror'
 
 # Every gate. Run before committing
 ci:
