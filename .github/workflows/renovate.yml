@@ -44,10 +44,16 @@ jobs:
     uses: divbast/ci/.github/workflows/renovate.yml@0f7985f17f95d99e1928539dc53f381d46f934c9 # v3.9.0
     with:
       automerge: ${{ vars.OCI_IMAGE_TEMPLATE_AUTOMERGE == 'enabled' }}
+      # The DHI login, without which dhi.io answers nothing: Renovate looks
+      # up the pins of Docker Hardened Images with it. An app whose
+      # divbast/infra entry has no dhi = true reads both empty, and
+      # Renovate runs with no host rule.
+      dhi-username: ${{ vars.DHI_USERNAME }}
     # The App's key lives in this repository's `renovate` environment, and a
     # called workflow sees an environment secret only when its caller passes
     # it by name.
     secrets:
       RENOVATE_APP_PRIVATE_KEY: ${{ secrets.RENOVATE_APP_PRIVATE_KEY }}
+      DHI_TOKEN: ${{ secrets.DHI_TOKEN }}
     # Renovate works through the App's token; GITHUB_TOKEN needs nothing.
     permissions: {}

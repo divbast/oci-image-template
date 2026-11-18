@@ -41,9 +41,20 @@ jobs:
     name: check
     uses: divbast/ci/.github/workflows/app-check.yml@0f7985f17f95d99e1928539dc53f381d46f934c9 # v3.9.0
     with:
-      # PHPStan over the PHP layer: a Go app made from the template drops
-      # this with layers/php
+      # PHPStan over the PHP layer: a Go or .NET app made from the template
+      # drops this with layers/php
       php: true
+      # The DHI login, without which dhi.io answers nothing: the lint and
+      # the build log in with it to read a Containerfile's Docker Hardened
+      # Images. An app whose divbast/infra entry has no dhi = true reads
+      # both empty, and ci skips the login.
+      dhi-username: ${{ vars.DHI_USERNAME }}
+      # The .NET layer's images, which the lint verifies before it runs
+      # any. README.md's "Making a new app", step 0, drops this with
+      # layers/.
+      verify-containerfiles: layers/dotnet/Containerfile
+    secrets:
+      DHI_TOKEN: ${{ secrets.DHI_TOKEN }}
     permissions:
       contents: read
       attestations: read # verify the attestations of the images the Containerfile builds from
@@ -83,7 +94,7 @@ jobs:
     with:
       image: ghcr.io/divbast/oci-image-template
       version-arg: TEMPLATE_VERSION
-      description: A minimal divbast app, one PHP page on FrankenPHP. Zero capabilities, read-only root, non-root, no shell
+      description: A minimal divbast app, one page from a stdlib Go server. Zero capabilities, read-only root, non-root, no shell
       # Decides against image, then pushes, attests and verifies in a
       # registry the job starts for itself, so nothing reaches ghcr.io. An
       # app made from this repository sets image to its own and removes
