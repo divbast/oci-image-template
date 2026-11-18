@@ -131,13 +131,14 @@ breaking change.
   on a stale base proves nothing. **It merges its own PRs** once every
   check passes, with a squash, while the repository variable
   `OCI_IMAGE_TEMPLATE_AUTOMERGE` is `enabled`; any other value stops
-  merging from the next run. A new major of divbast/ci, and a raise of
-  `go.mod`'s `go` line, wait for approval on the Dependency Dashboard
-  first. **A merge never publishes.** `build.yml`'s daily run is the
-  publishing slot, through divbast/ci's `app-publish.yml`, and a manual
-  run of `build` publishes at once. `.github/workflows/stall.yml`, through
-  divbast/ci's `stall.yml`, fails each day that updates have stopped
-  flowing: a Renovate PR stuck, or Renovate silent
+  merging from the next run. A new major of divbast/ci, a raise of
+  `go.mod`'s `go` line, and a .NET major wait for approval on the
+  Dependency Dashboard first. **A merge never publishes.** `build.yml`'s
+  daily run is the publishing slot, through divbast/ci's
+  `app-publish.yml`, and a manual run of `build` publishes at once.
+  `.github/workflows/stall.yml`, through divbast/ci's `stall.yml`, fails
+  each day that updates have stopped flowing: a Renovate PR stuck, or
+  Renovate silent
 - **The publish job rehearses.** `build.yml` calls `app-publish.yml` with
   `image: ghcr.io/divbast/oci-image-template` and `rehearse: true`. It
   decides against that image on ghcr.io, which is never published, so
@@ -223,14 +224,17 @@ globs.
   runtimeconfig to the runtime image's tag. Each fails a mismatch with the
   steps to take, naming "A .NET major" below. Each is a build-stage check
   under "Code quality"'s rules, and its Go test, `test/globaljson` or
-  `test/runtimemajor`, also checks the Containerfile runs it where it must
+  `test/runtimemajor`, also checks the Containerfile runs it where it
+  must. The two scripts and their tests are prowlarr-oci-image's too,
+  byte for byte but for the SPDX line, so a change to one goes to both
 - **The demo has no `global.json`**, and its target framework is whichever
   its SDK bundles. Renovate's NuGet manager would move a `global.json` on
   its own, apart from the SDK image: a second SDK pin, free to disagree
   with the first. An upstream's arrives with its source at build time,
   where Renovate never sees it
 
-Once in place, these hold of it, as they do of Prowlarr:
+Once in place, these hold of it, and of Prowlarr too, except where a
+bullet says otherwise:
 
 - **Every stage is a Docker Hardened Image, by digest**, its signature by
   Docker verified before anything is built: the SDK, the probe's Go, and
@@ -240,13 +244,16 @@ Once in place, these hold of it, as they do of Prowlarr:
 - **The app is framework-dependent**, so a rebuild of the runtime image
   patches the .NET it runs on. It is published offline, after a restore,
   to `/app/bin`, with no target framework in any path; `/app/bin` is
-  root-owned, never written, and ASP.NET Core's content root
-- **One port, 8080, with `/healthz` beside the page.** The apphost is PID 1
+  root-owned and never written. Here it is also the runtime stage's
+  `WORKDIR`, and so ASP.NET Core's content root; Prowlarr's runtime stage
+  sets no `WORKDIR`
+- **One port, 8080, with health beside the page.** The apphost is PID 1
   and the one listener, with .NET's diagnostics socket off. An upstream
   .NET app cannot host a probe subcommand, so the probe, `divbast-template`,
   is a static Go binary of its own, on the standard library, which the
   `HEALTHCHECK` runs. The contract has no health port: `HealthPort` 0, and
-  `HealthPath` `/healthz`
+  `HealthPath` the app's own health endpoint, here `/healthz`, and
+  Prowlarr's `/ping`
 
 ### A .NET major
 
@@ -258,9 +265,14 @@ with a message naming this section; only an upstream with no
 `global.json` that retargets first fails on dotnet's own error instead.
 Each step needs the user's go-ahead:
 
-1. The app's Renovate PR is red with one of the checks' messages.
+1. The app's Renovate PR is red with one of the checks' messages, where
+   `W` is the new .NET:
+   `ERROR: global.json asks for the .NET W SDK; … Approve the .NET W major …`
+   or `ERROR: the app targets .NET W; … Approve …`.
 2. Approve the major, the "dhi .NET SDK and runtime" group, on the
-   Dependency Dashboard. Renovate opens its PR, red on its own.
+   Dependency Dashboard. Renovate opens its PR, red on its own: a check
+   fails it with `ERROR: … A .NET major waits until … retargets …`, which
+   here is expected, and no reason to stop.
 3. On a branch from main, take both Renovate commits with
    `git cherry-pick -S`, open a PR, and merge it when green.
 4. Close the two Renovate PRs.

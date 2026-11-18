@@ -235,12 +235,18 @@ README says how. The copy arrives as one commit, and nothing in it is
 renamed for you. Then, in this order:
 
 0. **Go, PHP or .NET.** Choose once, first, since every step after names
-   the files of one of them. A Go or PHP app also drops the .NET layer's
-   lint and verification: the justfile's `dotnet-lint` recipe; the three
-   `lint` lines after PHPStan's, which run it, hadolint and
-   `docker build --check` on the layer; what `lint`'s comment says of the
-   layer and dhi.io; and `verify-containerfiles` on `build.yml`'s `check`
-   job, with its comment.
+   the files of one of them. Each of the three deletes `layers/`, so
+   `.dockerignore`'s `layers/` line goes too, with its comment. A Go or
+   PHP app also drops the .NET layer's lint and verification: the
+   justfile's `dotnet-lint` recipe; the three `lint` lines after
+   PHPStan's, which run it, hadolint and `docker build --check` on the
+   layer; what `lint`'s comment says of the layer and dhi.io; and
+   `verify-containerfiles` on `build.yml`'s `check` job, with its comment.
+   It drops the lines for a local dotnet build's output as well,
+   `src/**/bin` and `src/**/obj` in `.dockerignore` and `**/src/**/bin/`
+   and `**/src/**/obj/` in `.gitignore`, each pair with its comment: kept,
+   they would hide any `bin/` or `obj/` under a `src/` of the app's own
+   from git and the build.
    - **A Go app** keeps the Go core: `cmd/template`, `internal/server` and
      the Containerfile as they are. Delete `layers/`, the justfile's
      `composer install` and PHPStan lines, and `php: true` on `build.yml`'s
@@ -300,7 +306,9 @@ renamed for you. Then, in this order:
          the DHI login the workflows pass.
 1. **Names.** Pick the app's name, `<app>`: the image will be
    `ghcr.io/divbast/<app>`. Set it in:
-   - `go.mod`'s module path, `github.com/divbast/<repository>`;
+   - `go.mod`'s module path, `github.com/divbast/<repository>`, and every
+     import of it, in `cmd/` and `internal/` and their tests, which a PHP
+     app no longer has;
    - the justfile's `APP`, from which `IMAGE`, `ARCHIVE` and `PUBLISHED`
      follow;
    - the Containerfile: `TEMPLATE_VERSION`, renamed `<APP>_VERSION` and set
@@ -314,10 +322,12 @@ renamed for you. Then, in this order:
      Containerfile, the Caddyfile, `phpstan.neon`, the probe's messages
      and `test/acceptance/contract_test.go`;
    - a .NET app's probe, `cmd/divbast-template` and
-     `/usr/local/bin/divbast-template`, as `divbast-<app>`, and its demo
-     project, `src/Template`, which names the apphost, `/app/bin/Template`,
-     everywhere each is named: the Containerfile, the probe's messages and
-     `test/acceptance/contract_test.go`;
+     `/usr/local/bin/divbast-template`, as `divbast-<app>`, everywhere it
+     is named: the Containerfile, the probe's messages and
+     `test/acceptance/contract_test.go`. The demo keeps its names,
+     `src/Template`, `Template.csproj` and `/app/bin/Template`, until step
+     6 replaces it with the app, whose project file's name is its
+     apphost's, and so PID 1's path;
    - `build.yml`'s `version-arg` and `description`;
    - this README and `CLAUDE.md`.
 2. **The crons.** Give `build.yml`'s daily slot and `stall.yml`'s check
@@ -363,7 +373,10 @@ renamed for you. Then, in this order:
    to `/healthz`. A Go app replaces `internal/server`; a PHP app replaces
    `public/index.php` and the Caddyfile's `:8080` routes, and lists every
    PHP file the image ships in `phpstan.neon`'s `paths`; a .NET app
-   deletes the demo, `src/`, which its fetch stage replaced at step 4.
+   deletes the demo, `src/`, which its fetch stage replaced at step 4, and
+   names the app's project where the Containerfile names
+   `Template/Template.csproj`, and its apphost wherever `/app/bin/Template`
+   is named.
 7. **A PHP app's own binary.** A Go or .NET app skips this. Add the app to
    divbast/frankenphp in one pull request there:
    - `apps/<app>.env`, holding each of `PHP_EXTENSIONS`,
