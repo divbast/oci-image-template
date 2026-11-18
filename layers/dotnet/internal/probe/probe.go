@@ -5,6 +5,12 @@
 // HEALTHCHECK runs as divbast-template health. An upstream .NET app cannot
 // host a probe subcommand, so the probe is a small binary of its own. Both
 // halves are on the app port: the app serves /healthz beside its page.
+//
+// Unlike the Go core's probe, which it is copied from, it follows no
+// redirect, and reports one as the status it is. A .NET app's middleware
+// commonly redirects, to a URL base, to HTTPS or to a login page, and a
+// half that followed one would pass on whatever answered where it led,
+// another half's answer among them.
 package probe
 
 import (
@@ -23,11 +29,11 @@ const Page = "Hello from oci-image-template"
 const halfWithin = 4 * time.Second
 
 // Probe checks the app is healthy, in two halves, neither of which implies
-// the other: healthURL, the health port's /healthz, answers 200, and
-// appURL, the app port's /, answers 200 with exactly Page. It prints
-// nothing and returns 0 when both hold. Otherwise it prints one
-// "<check>: <reason>" line for each half that failed, healthz or page, to
-// stderr, which is the only record of why, and returns 1.
+// the other: healthURL, the app's /healthz, answers 200, and appURL, its
+// /, answers 200 with exactly Page. It prints nothing and returns 0 when
+// both hold. Otherwise it prints one "<check>: <reason>" line for each
+// half that failed, healthz or page, to stderr, which is the only record
+// of why, and returns 1.
 func Probe(ctx context.Context, appURL, healthURL string, stderr io.Writer) int {
 	code := 0
 	if err := half(ctx, healthURL, func(status int, _ []byte) error {
@@ -52,7 +58,7 @@ func Probe(ctx context.Context, appURL, healthURL string, stderr io.Writer) int 
 }
 
 // half sends GET url within halfWithin, and returns what check makes of
-// the answer, or why there was none.
+// the answer, a redirect's included, or why there was none.
 func half(ctx context.Context, url string, check func(status int, body []byte) error) error {
 	ctx, cancel := context.WithTimeout(ctx, halfWithin)
 	defer cancel()
@@ -60,7 +66,7 @@ func half(ctx context.Context, url string, check func(status int, body []byte) e
 	if err != nil {
 		return err
 	}
-	resp, err := http.DefaultClient.Do(req)
+	resp, err := noRedirects.Do(req)
 	if err != nil {
 		return err
 	}
@@ -70,4 +76,10 @@ func half(ctx context.Context, url string, check func(status int, body []byte) e
 		return err
 	}
 	return check(resp.StatusCode, body)
+}
+
+// noRedirects reports a redirect as its status instead of following it,
+// so each half judges the answer of the URL it was given.
+var noRedirects = &http.Client{
+	CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse },
 }
