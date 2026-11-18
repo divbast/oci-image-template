@@ -347,9 +347,9 @@ func TestUsage(t *testing.T) {
 	}
 }
 
-// TestContainerfileRunsIt fails unless the layer's Containerfile runs the
-// check where it must: wiringProblems, which TestWiringProblems sees
-// refuse each way the wiring could go wrong, finds nothing wrong with it.
+// TestContainerfileRunsIt fails unless the Containerfile runs the check
+// where it must: wiringProblems, which TestWiringProblems sees refuse each
+// way the wiring could go wrong, finds nothing wrong with it.
 func TestContainerfileRunsIt(t *testing.T) {
 	t.Parallel()
 
@@ -550,8 +550,8 @@ func stageAt(containerfile string, at int) (stage string, offset int, ok bool) {
 	return containerfile[start:end], at - start, true
 }
 
-// wired is a Containerfile that runs both checks where they must, as the
-// layer's does, for TestWiringProblems to change one way at a time.
+// wired is a Containerfile that runs both checks where they must, for
+// TestWiringProblems to change one way at a time.
 const wired = `ARG RUNTIME_IMAGE=dhi.io/aspnetcore:10.0.15-debian13
 
 FROM dhi.io/dotnet:10.0.404-sdk-debian13 AS backend
