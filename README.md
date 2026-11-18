@@ -13,7 +13,9 @@ vulnerability scan, and a daily rehearsed publish.
 Every new divbast image repository starts as a copy of this one, whatever
 its app is written in. A Go app keeps the Go core. A PHP app served by
 FrankenPHP moves the PHP layer, `layers/php`, into place: the same page as
-a FrankenPHP app, linted here but not built.
+a FrankenPHP app, linted here but not built. A .NET app moves the .NET
+layer, `layers/dotnet`, into place: the same page again, from ASP.NET Core,
+also linted here but not built.
 [Making a new app](#making-a-new-app) lists what to change, in order.
 
 Its publish job rehearses: it runs every step of a real publish against a
@@ -34,6 +36,14 @@ The PHP layer runs [FrankenPHP](https://github.com/php/frankenphp) instead:
 PHP 8.5 and Caddy in one binary, built by
 [divbast/frankenphp](https://github.com/divbast/frankenphp) and copied in
 by digest, on `cc-debian13`, as divbast's PHP apps do.
+
+The .NET layer runs a framework-dependent ASP.NET Core app on
+[Docker Hardened Images](https://docs.docker.com/dhi/)' ASP.NET Core
+runtime, which holds the .NET runtime, ICU and OpenSSL, and no shell or
+package manager. The app is built in their .NET SDK image, and its health
+probe, a static Go binary on the standard library, in their Go image. All
+three are pinned by digest, and CI checks Docker's signature on each before
+the lint runs any of them.
 
 ## Container Features
 
@@ -168,7 +178,8 @@ Every input the Containerfile names is pinned by digest: the `golang`
 builder and the distroless runtime. The app is the standard library alone,
 so `go.mod` requires nothing but divbast/ci's harness for its tests. The
 PHP layer's fragment pins the FrankenPHP binary by the digest of
-`ghcr.io/divbast/frankenphp:baikal`.
+`ghcr.io/divbast/frankenphp:baikal`, and the .NET layer's Containerfile
+its three Docker Hardened Images by tag and digest.
 
 A pin only moves through a pull request, and
 [Renovate](https://docs.renovatebot.com/) opens those. It runs every
@@ -185,6 +196,13 @@ are:
 - A new `:baikal` binary arrives as a pull request that moves the PHP
   layer's digest, and a new `cc-debian13` image as one that moves the PHP
   layer's runtime digest.
+- A new .NET SDK or ASP.NET Core image arrives as one pull request that
+  moves both of the .NET layer's pins, since an app needs the runtime
+  patch its SDK knows, and a new Go image for its probe as one of its own.
+  dhi.io answers nothing without a login, so `renovate.yml` passes Renovate
+  the DHI login divbast/infra keeps here. The demo has no `global.json`,
+  and its target framework follows its SDK, so a .NET major moves nothing
+  else in the template.
 - A release of divbast/ci arrives as one pull request that moves every
   workflow's pin of it together.
 - The toolchain in `mise.toml` and PHPStan in `layers/php/composer.lock`
@@ -192,11 +210,11 @@ are:
 
 Renovate merges its own pull requests once every check on one has passed,
 while the repository variable `OCI_IMAGE_TEMPLATE_AUTOMERGE` is `enabled`.
-Two kinds first wait for someone to approve them on the Dependency
-Dashboard: a new major version of divbast/ci, and a raise of `go.mod`'s
-`go` line. Any other value of the variable, or none, stops merging from the
-next run, and Renovate goes on opening and rebasing pull requests for a
-person to merge:
+Three kinds first wait for someone to approve them on the Dependency
+Dashboard: a new major version of divbast/ci, a raise of `go.mod`'s `go`
+line, and a .NET major. Any other value of the variable, or none, stops
+merging from the next run, and Renovate goes on opening and rebasing pull
+requests for a person to merge:
 
     gh variable set OCI_IMAGE_TEMPLATE_AUTOMERGE --body disabled
 
@@ -216,10 +234,15 @@ rulesets, its `renovate` environment and its kill switch. divbast/infra's
 README says how. The copy arrives as one commit, and nothing in it is
 renamed for you. Then, in this order:
 
-0. **Go or PHP.** Choose once, first, since every step after names the
-   files of one or the other:
+0. **Go, PHP or .NET.** Choose once, first, since every step after names
+   the files of one of them. A Go or PHP app also drops the .NET layer's
+   lint and verification: the justfile's `dotnet-lint` recipe; the three
+   `lint` lines after PHPStan's, which run it, hadolint and
+   `docker build --check` on the layer; what `lint`'s comment says of the
+   layer and dhi.io; and `verify-containerfiles` on `build.yml`'s `check`
+   job, with its comment.
    - **A Go app** keeps the Go core: `cmd/template`, `internal/server` and
-     the Containerfile as they are. Delete `layers/php`, the justfile's
+     the Containerfile as they are. Delete `layers/`, the justfile's
      `composer install` and PHPStan lines, and `php: true` on `build.yml`'s
      `check` job.
    - **A PHP app** served by FrankenPHP moves `layers/php` into place:
@@ -239,6 +262,42 @@ renamed for you. Then, in this order:
      [Baikal](https://github.com/divbast/baikal-oci-image) and
      [LibreSpeed](https://github.com/divbast/librespeed-oci-image) are
      the fully tested PHP apps to follow.
+   - **A .NET app** moves `layers/dotnet` into place, over the Go core;
+     [Prowlarr](https://github.com/divbast/prowlarr-oci-image) is the fully
+     tested .NET app to follow. The layer's `Containerfile` is a whole one,
+     written for the layout this leaves. From the repository's root:
+     1. `git rm -r cmd internal layers/php Containerfile`.
+     2. `git mv layers/dotnet/test/* test/`, beside `test/acceptance`.
+     3. `git mv layers/dotnet/Containerfile layers/dotnet/cmd layers/dotnet/internal layers/dotnet/src .`
+        Then delete the Containerfile's opening comment, on the layer and
+        this move, which no longer holds.
+     4. `rm -rf layers`: nothing tracked is left in it, but PHPStan's
+        `vendor/` may be.
+     5. In `cmd/divbast-template/main.go` and
+        `internal/probe/probe_test.go`, drop `/layers/dotnet` from the
+        probe's import path, which leaves
+        `github.com/divbast/oci-image-template/internal/probe` for step 1
+        to rename with the module.
+     6. In the justfile, delete `composer install` from `setup` and
+        PHPStan from its comment, every `lint` line but the first, and
+        the `dotnet-lint` recipe. The first line's `app-lint` lints the
+        root Containerfile, now the .NET one, so `lint`'s comment says the
+        Docker daemon must be logged in to dhi.io for its images.
+     7. On `build.yml`'s `check` job, delete `php: true` and
+        `verify-containerfiles`, each with its comment. `dhi-username` and
+        `DHI_TOKEN` stay, since the build reads dhi.io now.
+     8. In `test/acceptance/contract_test.go`, health moves to the app
+        port, beside the page: delete the `healthPort` constant and
+        `HealthOnly404`, and set `HealthPort: 0` and
+        `HealthPath: "/healthz"`. `binary` becomes the probe,
+        `/usr/local/bin/divbast-template`, which `Exec` and `healthCmd`
+        run, and `serverArgv`, PID 1's argv, the apphost alone:
+        `[]string{"/app/bin/Template"}`. Their comments follow.
+     9. In `test/acceptance/serves_test.go`, delete `"/healthz"` from
+        `refused`, and check with `harness.StatusIs` that GET `/healthz`
+        answers 200. The comments follow here too.
+     10. Give the app's entry in divbast/infra `dhi = true`, which writes
+         the DHI login the workflows pass.
 1. **Names.** Pick the app's name, `<app>`: the image will be
    `ghcr.io/divbast/<app>`. Set it in:
    - `go.mod`'s module path, `github.com/divbast/<repository>`;
@@ -254,6 +313,11 @@ renamed for you. Then, in this order:
      served tree, `/var/www/<app>`, everywhere each is named: the
      Containerfile, the Caddyfile, `phpstan.neon`, the probe's messages
      and `test/acceptance/contract_test.go`;
+   - a .NET app's probe, `cmd/divbast-template` and
+     `/usr/local/bin/divbast-template`, as `divbast-<app>`, and its demo
+     project, `src/Template`, which names the apphost, `/app/bin/Template`,
+     everywhere each is named: the Containerfile, the probe's messages and
+     `test/acceptance/contract_test.go`;
    - `build.yml`'s `version-arg` and `description`;
    - this README and `CLAUDE.md`.
 2. **The crons.** Give `build.yml`'s daily slot and `stall.yml`'s check
@@ -270,10 +334,12 @@ renamed for you. Then, in this order:
    Renovate manager in `renovate.json` in the same change: a `customManagers`
    entry for an `ARG` no `FROM` reads, and a `packageRules` entry naming its
    labels and commit prefix. LibreSpeed's `renovate.json` and its fetch
-   stage are a worked example. An app that ships the upstream's files adds
-   the upstream's licence to the Containerfile's
-   `org.opencontainers.image.licenses` `LABEL`, as `CLAUDE.md` requires,
-   and says which file carries which licence in this README.
+   stage are a worked example. A .NET app's fetch stage replaces the
+   backend stage's `COPY src/ ./`, as Prowlarr's does. An app that ships
+   the upstream's files adds the upstream's licence to the Containerfile's
+   `org.opencontainers.image.licenses` `LABEL`, as `CLAUDE.md` requires.
+   Which licence each file in the repository carries is REUSE's to say, by
+   its SPDX header, not this README's.
 5. **The contract.** Set what the app's confinement contract says, in
    `test/acceptance/contract_test.go` and in the Containerfile alike, then
    in the tables here and in `CLAUDE.md`, the Volume row among them: the
@@ -296,8 +362,9 @@ renamed for you. Then, in this order:
    serves. Replace the page half of the probe, and add the app's own checks
    to `/healthz`. A Go app replaces `internal/server`; a PHP app replaces
    `public/index.php` and the Caddyfile's `:8080` routes, and lists every
-   PHP file the image ships in `phpstan.neon`'s `paths`.
-7. **A PHP app's own binary.** A Go app skips this. Add the app to
+   PHP file the image ships in `phpstan.neon`'s `paths`; a .NET app
+   deletes the demo, `src/`, which its fetch stage replaced at step 4.
+7. **A PHP app's own binary.** A Go or .NET app skips this. Add the app to
    divbast/frankenphp in one pull request there:
    - `apps/<app>.env`, holding each of `PHP_EXTENSIONS`,
      `PHP_EXTENSION_LIBS`, `EXPECTED_EXTENSIONS` and
@@ -358,11 +425,13 @@ renamed for you. Then, in this order:
 - `just build` builds the image locally, without verifying the images it
   builds from; `just ci-tools && .ci/bin/divbast-verify-images` does, with
   cosign from `mise.toml`, and gh 2.102.0 or newer for a FrankenPHP
-  binary.
+  binary. With `-containerfile layers/dotnet/Containerfile`, and
+  `DHI_USERNAME` and `DHI_TOKEN` set, it verifies the .NET layer's.
 - `just test` builds, then runs the acceptance suite against the image,
   under `ENGINE`, docker unless it says podman.
 - `just lint` runs every lint gate, and needs a running Docker daemon, for
-  `docker build --check`.
+  `docker build --check`, logged in to dhi.io for the .NET layer's images,
+  which it reads and runs.
 - `just ci` runs every gate, the scan included. Run it before committing.
 
 The recipes that call GitHub, pinact's and zizmor's, read a fine-grained

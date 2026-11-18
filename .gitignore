@@ -6,3 +6,7 @@
 .agents/
 .superpowers/
 vendor/
+# A local dotnet build's output, beside the .NET layer's source, before
+# and after step 0 moves it
+**/src/**/bin/
+**/src/**/obj/
