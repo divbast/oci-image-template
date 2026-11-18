@@ -185,6 +185,13 @@ func TestSDKMismatch(t *testing.T) {
 			sdk:     "10.0.404",
 			want:    fmt.Sprintf(upstreamAhead, "10.1", "10.0"),
 		},
+		{
+			// The minor compared as a number too: 10 sorts before 9 as text
+			name:    "upstream-ahead-by-a-two-digit-minor",
+			version: "10.10.100",
+			sdk:     "10.9.100",
+			want:    fmt.Sprintf(upstreamAhead, "10.10", "10.9"),
+		},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {

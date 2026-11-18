@@ -170,6 +170,19 @@ func TestRuntimeMismatch(t *testing.T) {
 			image:   "dhi.io/aspnetcore:9.0.11-debian13" + digest,
 			want:    fmt.Sprintf(appAhead, "10.0", "9.0"),
 		},
+		{
+			// The same major, a later minor
+			name:    "app-ahead-by-a-minor",
+			version: "10.1.0",
+			image:   image,
+			want:    fmt.Sprintf(appAhead, "10.1", "10.0"),
+		},
+		{
+			name:    "runtime-ahead-by-a-minor",
+			version: "10.0.0",
+			image:   "dhi.io/aspnetcore:10.1.2-debian13" + digest,
+			want:    fmt.Sprintf(runtimeAhead, "10.0", "10.1"),
+		},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
