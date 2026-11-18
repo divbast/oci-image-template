@@ -28,6 +28,14 @@
 # global.json is built as it is, by the image's SDK, and runtime-major.sh,
 # after publish, still guards what ships.
 #
+# Its limits: the rewrite keeps sdk.version alone, and drops every other
+# key, such as msbuild-sdks, and the sdk object's allowPrerelease and
+# paths, so an upstream that needs one needs this script changed first. A
+# global.json with no sdk.version, one that pins msbuild-sdks alone among
+# them, is refused, not rewritten. And only FILE is read, the global.json
+# at the source's root, as the backend stage names it: one further down
+# the tree is neither checked nor rewritten.
+#
 # test/globaljson runs it over fixtures, and checks each way it can
 # refuse.
 #
