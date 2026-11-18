@@ -8,8 +8,8 @@ container image that runs at zero Linux capabilities, with no new
 privileges, on a read-only root filesystem as a non-root user. Every new
 divbast image repository is made from it, by its entry in `divbast/infra`,
 and then changed as the README's "Making a new app" says, in that order:
-a Go app keeps the Go core, and a PHP app moves the PHP layer,
-`layers/php`, into place.
+a Go app keeps the Go core, a PHP app moves the PHP layer, `layers/php`,
+into place, and a .NET app the .NET layer, `layers/dotnet`.
 
 It publishes nothing to ghcr.io: its publish job rehearses. The divbast
 organisation's settings, rulesets and Renovate wiring live in
@@ -18,8 +18,9 @@ organisation's settings, rulesets and Renovate wiring live in
 What makes the image this app's lives here: the Containerfile, the app
 (`cmd/template`, `internal/server`), and the acceptance tests, beside the
 PHP layer: its Containerfile fragment, Caddy and PHP configuration, page,
-and health probe and endpoint. The pipeline around it is shared, and
-reaches this repository at a pinned commit:
+and health probe and endpoint; and beside the .NET layer: its whole
+Containerfile, demo app, health probe and build-stage checks. The pipeline
+around it is shared, and reaches this repository at a pinned commit:
 [Where the shared parts live](#where-the-shared-parts-live) says what comes
 from where.
 
@@ -130,13 +131,14 @@ breaking change.
   on a stale base proves nothing. **It merges its own PRs** once every
   check passes, with a squash, while the repository variable
   `OCI_IMAGE_TEMPLATE_AUTOMERGE` is `enabled`; any other value stops
-  merging from the next run. A new major of divbast/ci, and a raise of
-  `go.mod`'s `go` line, wait for approval on the Dependency Dashboard
-  first. **A merge never publishes.** `build.yml`'s daily run is the
-  publishing slot, through divbast/ci's `app-publish.yml`, and a manual
-  run of `build` publishes at once. `.github/workflows/stall.yml`, through
-  divbast/ci's `stall.yml`, fails each day that updates have stopped
-  flowing: a Renovate PR stuck, or Renovate silent
+  merging from the next run. A new major of divbast/ci, a raise of
+  `go.mod`'s `go` line, and a .NET major wait for approval on the
+  Dependency Dashboard first. **A merge never publishes.** `build.yml`'s
+  daily run is the publishing slot, through divbast/ci's
+  `app-publish.yml`, and a manual run of `build` publishes at once.
+  `.github/workflows/stall.yml`, through divbast/ci's `stall.yml`, fails
+  each day that updates have stopped flowing: a Renovate PR stuck, or
+  Renovate silent
 - **The publish job rehearses.** `build.yml` calls `app-publish.yml` with
   `image: ghcr.io/divbast/oci-image-template` and `rehearse: true`. It
   decides against that image on ghcr.io, which is never published, so
@@ -199,6 +201,85 @@ do of Baikal and LibreSpeed:
   because `COPY --chmod` gives a directory it creates the file's mode, and
   a directory of mode 0644 cannot be entered
 
+### The .NET layer
+
+`layers/dotnet` is the template's .NET app, kept for a .NET app to move
+into place, and like the PHP layer it is linted but never built. Its
+`Containerfile` is a whole one, which replaces the root one at step 0 and
+is written for the layout that leaves. It keeps the layer rule with no
+stand-in: each of its three pins sits where a `FROM` uses it. `just lint`
+runs `dotnet-lint`, which checks the demo is formatted as `dotnet format`
+leaves it and builds with every warning an error, in the SDK image the
+backend stage pins, then hadolint and `docker build --check` over the
+Containerfile. In CI, the lint job first verifies the layer's images,
+through `build.yml`'s `verify-containerfiles`, so none runs unverified.
+The Go gates, ShellCheck, shfmt and REUSE reach the rest through their own
+globs.
+
+- **Two build-stage checks guard a .NET major**, which would otherwise
+  show only as dotnet's own error, or as an app that will not start.
+  `test/global-json.sh` holds the SDK an upstream's `global.json` names to
+  the image's major and minor, then lets it roll forward to any later
+  feature band; `test/runtime-major.sh` holds the published app's
+  runtimeconfig to the runtime image's tag. Each fails a mismatch with the
+  steps to take, naming "A .NET major" below. Each is a build-stage check
+  under "Code quality"'s rules, and its Go test, `test/globaljson` or
+  `test/runtimemajor`, also checks the Containerfile runs it where it
+  must. The two scripts and their tests are prowlarr-oci-image's too,
+  byte for byte but for the SPDX line, so a change to one goes to both
+- **The demo has no `global.json`**, and its target framework is whichever
+  its SDK bundles. Renovate's NuGet manager would move a `global.json` on
+  its own, apart from the SDK image: a second SDK pin, free to disagree
+  with the first. An upstream's arrives with its source at build time,
+  where Renovate never sees it
+
+Once in place, these hold of it, and of Prowlarr too, except where a
+bullet says otherwise:
+
+- **Every stage is a Docker Hardened Image, by digest**, its signature by
+  Docker verified before anything is built: the SDK, the probe's Go, and
+  the runtime, `dhi.io/aspnetcore`, which has no shell or package manager.
+  Renovate moves the SDK and runtime in one pull request, since an app
+  needs the runtime patch its SDK knows
+- **The app is framework-dependent**, so a rebuild of the runtime image
+  patches the .NET it runs on. It is published offline, after a restore,
+  to `/app/bin`, with no target framework in any path; `/app/bin` is
+  root-owned and never written. Here it is also the runtime stage's
+  `WORKDIR`, and so ASP.NET Core's content root; Prowlarr's runtime stage
+  sets no `WORKDIR`
+- **One port, 8080, with health beside the page.** The apphost is PID 1
+  and the one listener, with .NET's diagnostics socket off. An upstream
+  .NET app cannot host a probe subcommand, so the probe, `divbast-template`,
+  is a static Go binary of its own, on the standard library, which the
+  `HEALTHCHECK` runs. The contract has no health port: `HealthPort` 0, and
+  `HealthPath` the app's own health endpoint, here `/healthz`, and
+  Prowlarr's `/ping`
+
+### A .NET major
+
+A .NET major moves by hand, about once per LTS, because neither of its two
+pull requests can go green alone: upstream's retargeted release needs the
+new SDK, and the SDK and runtime the Dashboard holds back cannot build or
+run the app upstream had before. The build-stage checks above fail each
+with a message naming this section; only an upstream with no
+`global.json` that retargets first fails on dotnet's own error instead.
+Each step needs the user's go-ahead:
+
+1. The app's Renovate PR is red with one of the checks' messages, where
+   `W` is the new .NET:
+   `ERROR: global.json asks for the .NET W SDK; … Approve the .NET W major …`
+   or `ERROR: the app targets .NET W; … Approve …`.
+2. Approve the major, the "dhi .NET SDK and runtime" group, on the
+   Dependency Dashboard. Renovate opens its PR, red on its own: a check
+   fails it with `ERROR: … A .NET major waits until … retargets …`, which
+   here is expected, and no reason to stop.
+3. On a branch from main, take both Renovate commits with
+   `git cherry-pick -S`, open a PR, and merge it when green.
+4. Close the two Renovate PRs.
+
+For the template alone, approving the major is the whole step: the demo's
+target framework follows its SDK, and no upstream waits on it.
+
 ## Where the shared parts live
 
 - **divbast/ci.** `just setup` checks it out into `.ci/`, which git and
@@ -259,9 +340,10 @@ do of Baikal and LibreSpeed:
 - `just lint` — pinact, zizmor, actionlint, ShellCheck and shfmt, the Go
   gates (the compiler, `go vet`, `go fix -diff`, `go mod tidy -diff`,
   `golangci-lint fmt --diff` and `golangci-lint run`), `go-test`, `reuse
-  lint`, hadolint, `docker build --check` and PHPStan over the PHP layer. `go-test` runs every
-  Go test under the race detector; the acceptance suite skips there, since
-  `IMAGE` is unset
+  lint`, hadolint, `docker build --check`, PHPStan over the PHP layer, and
+  `dotnet-lint`, hadolint and `docker build --check` over the .NET layer.
+  `go-test` runs every Go test under the race detector; the acceptance
+  suite skips there, since `IMAGE` is unset
 - `just archive`, `just scan` — write the image as an OCI archive, then run
   `divbast-scan` over it and the published `:latest`. Needs network access
   to ghcr.io
@@ -284,9 +366,15 @@ do of Baikal and LibreSpeed:
   vendor directory once `go.mod` has a `require`, and refuse to build;
   readonly is the default outside vendor mode, and still refuses to edit
   `go.mod`
-- **`just lint` needs a running Docker daemon**, for `docker build --check`.
-  `--check` is a buildx flag with no podman equivalent, so this one gate does
-  not honour `ENGINE` and does not run without dockerd
+- **`just lint` needs a running Docker daemon**, for `docker build --check`,
+  logged in to dhi.io for the .NET layer's images, which `dotnet-lint` runs
+  and `--check` reads. `--check` is a buildx flag with no podman
+  equivalent, so that gate does not honour `ENGINE` and does not run
+  without dockerd
+- **The .NET SDK is not in mise.** The demo is linted in the SDK image the
+  .NET layer's backend stage pins, which CI verifies first: one SDK pin,
+  and no second one in `mise.toml` to disagree with it. `dotnet-lint` runs
+  it under Docker whatever `ENGINE` says, since the dhi.io login is Docker's
 - **`just scan` needs `skopeo` on `PATH`.** It reads the published image with
   [skopeo](https://github.com/containers/skopeo), which no `mise.toml` entry
   provides, so `just ci` needs it too. CI runners already have it
@@ -334,7 +422,8 @@ do of Baikal and LibreSpeed:
 - REUSE-compliant SPDX headers on every file; licence is **BSD-2-Clause**.
   The image's licences label names only that, because the image ships
   nothing else of its own; an app that ships an upstream's files adds the
-  upstream's licence to the label and the README together
+  upstream's licence to the label, and leaves which file carries which
+  licence to REUSE and the files' SPDX headers
 - **The acceptance suite is Go, on divbast/ci's harness.** Every
   container it starts runs under `harness.Contract("16m")`, the *exact*
   confinement the contract claims, `--security-opt no-new-privileges` and

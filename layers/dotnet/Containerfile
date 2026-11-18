@@ -1,0 +1,127 @@
+# SPDX-License-Identifier: BSD-2-Clause
+# SPDX-FileCopyrightText: 2026 Aryan Ameri <github@aryan.ameri.coffee>
+
+# The template's .NET app, as a whole Containerfile: what a framework-
+# dependent .NET app on Docker Hardened Images puts in place of the Go
+# app's. It is linted here and never built. README.md's step 0 moves it over
+# the root Containerfile, so it is written for the layout after that move:
+# go.mod, cmd/, internal/, src/ and test/ at the repository's root.
+
+# The app's own version, which tags the image: app-publish.yml reads it from
+# this line, by the name build.yml gives as version-arg. The assemblies and
+# the probe carry it too.
+ARG TEMPLATE_VERSION=0.2.0
+# The runtime: Docker Hardened Images' ASP.NET Core on Debian 13, with ICU,
+# OpenSSL and the .NET runtime the app runs on, no shell and no package
+# manager, and its nonroot user 65532. The app is built framework-dependent,
+# so a rebuild of this image patches the runtime. Renovate moves it and the
+# backend's SDK in one PR, and holds a .NET major for the Dependency
+# Dashboard. CI verifies its signature by Docker before anything is built,
+# as it does every stage's image below.
+ARG RUNTIME_IMAGE=dhi.io/aspnetcore:10.0.15-debian13@sha256:9221d55b3bcf618cc56da297a64b1c3294458048109b95b8f3ce39d2dd8e0b33
+
+# The backend, framework-dependent for this stage's own architecture.
+FROM dhi.io/dotnet:10.0.404-sdk-debian13@sha256:40c7a4fd82c981f0df98ced709d21cabfd5491324f567c74b3b0d716477873ae AS backend
+# RUNTIME_IMAGE with no default of its own takes the one above, which the
+# runtime stage is built FROM, for the check after publish
+ARG TEMPLATE_VERSION RUNTIME_IMAGE TARGETARCH
+# nuget.org signs every package it serves: NuGet checks those signatures
+# here, whatever the SDK's default on Linux.
+ENV DOTNET_CLI_TELEMETRY_OPTOUT=1 \
+    DOTNET_NUGET_SIGNATURE_VERIFICATION=true
+SHELL ["/bin/bash", "-euo", "pipefail", "-c"]
+WORKDIR /src
+# The demo's source. At README.md's step 4 an app's fetch stage replaces
+# this COPY, with a COPY --from of the checkout it makes.
+COPY src/ ./
+COPY test/global-json.sh /tmp/global-json.sh
+COPY test/runtime-major.sh /tmp/runtime-major.sh
+# The one change made to an upstream file, which never leaves this stage.
+# A global.json with no roll-forward policy accepts only its own feature
+# band, so an SDK of a later band, which Renovate moves this stage's image
+# to, would refuse to build. The script keeps upstream's version as the
+# floor and accepts any later band of the same major and minor, after
+# checking that major and minor are this image's: a .NET major on one side
+# alone fails here, with the steps to take. A source with no global.json,
+# as the demo has none, skips both. dotnet asked from / reports the image's
+# own SDK, since no global.json is in the way there. hadolint's DL3003 asks
+# for WORKDIR in place of that cd, which lasts for the one command
+# substitution: WORKDIR would move the whole RUN away from the source.
+# hadolint ignore=DL3003
+RUN sdk=$(cd / && dotnet --version); /tmp/global-json.sh global.json "${sdk}"
+# The runtime identifier restore and publish share, kept in a file between
+# the RUN lines that read it.
+RUN case "${TARGETARCH}" in \
+        amd64) rid=linux-x64 ;; \
+        arm64) rid=linux-arm64 ;; \
+        *) echo "no .NET runtime identifier for ${TARGETARCH}" >&2; exit 1 ;; \
+    esac; \
+    printf '%s\n' "${rid}" >/tmp/rid
+# A publish for a runtime identifier, with --no-restore, needs a restore
+# for the same one, which fetches that identifier's runtime packs.
+RUN dotnet restore Template/Template.csproj -r "$(</tmp/rid)"
+# Everything it needs was restored above, so the publish runs offline. The
+# version is passed in, and the output goes to a fixed folder, so no target
+# framework appears in any path.
+RUN --network=none dotnet publish Template/Template.csproj -c Release -r "$(</tmp/rid)" \
+    --self-contained false --no-restore "-p:Version=${TEMPLATE_VERSION}" -o /out/bin
+# An app built for one .NET does not start on another's runtime, and
+# nothing else would say so: the script compares the .NET the published
+# runtimeconfig names with the one leading the runtime image's tag, and
+# fails a mismatch with the steps to take.
+RUN /tmp/runtime-major.sh /out/bin "${RUNTIME_IMAGE}"
+
+# The image's health probe, static and on the standard library alone.
+FROM dhi.io/golang:1.27.4-debian13-dev@sha256:065579ea342afd08d0e1f038866e7f4eed7e913f4be2f29c487db71804fd2506 AS probe
+ARG TEMPLATE_VERSION
+WORKDIR /src
+# go.mod's replace names ./.ci, which the build context leaves out: the
+# probe imports nothing from divbast/ci, so Go never looks for it
+COPY go.mod ./
+COPY cmd/ cmd/
+COPY internal/ internal/
+RUN CGO_ENABLED=0 GOFLAGS=-mod=readonly GOTOOLCHAIN=local \
+    go build -trimpath -ldflags "-s -w -X main.version=${TEMPLATE_VERSION}" \
+    -o /out/divbast-template ./cmd/divbast-template
+
+FROM ${RUNTIME_IMAGE}
+ARG TEMPLATE_VERSION
+
+# Root-owned, and never written
+COPY --from=backend /out/bin /app/bin
+COPY --from=probe /out/divbast-template /usr/local/bin/divbast-template
+# ASP.NET Core's content root, where an app's appsettings.json and wwwroot
+# sit beside its assemblies. The base's working directory is /, which as
+# the content root would hide both, and give the settings' reload watcher
+# the whole root filesystem to watch.
+WORKDIR /app/bin
+
+# The port is 8080, as every divbast image's. The base sets the same today;
+# set here, the port the contract names is this file's to say, and no
+# update of the base can move it. The runtime opens no diagnostics socket,
+# so nothing listens but 8080.
+ENV ASPNETCORE_HTTP_PORTS=8080 \
+    DOTNET_EnableDiagnostics=0
+
+LABEL org.opencontainers.image.source="https://github.com/divbast/oci-image-template" \
+    org.opencontainers.image.url="https://github.com/divbast/oci-image-template" \
+    org.opencontainers.image.title="oci-image-template" \
+    org.opencontainers.image.version="${TEMPLATE_VERSION}" \
+    org.opencontainers.image.licenses="BSD-2-Clause"
+
+EXPOSE 8080
+# Exec form: the shell form would need /bin/sh, which the image lacks.
+# --timeout must clear divbast-template health's own budget: it allows each
+# of its two exchanges 4 s and runs them one after the other, so a listener
+# that accepts and never answers costs 8 s. A shorter timeout kills the
+# probe mid-flight and records a bare engine timeout instead of the probe's
+# own line, which is the only diagnostic there is. Podman reads no
+# HEALTHCHECK from an image published as an OCI index: its users pass the
+# same array as --health-cmd.
+HEALTHCHECK --interval=30s --timeout=10s --start-period=60s --retries=3 \
+    CMD ["/usr/local/bin/divbast-template", "health"]
+USER 65532:65532
+# The app itself runs as PID 1, with nothing before it: .NET handles
+# SIGTERM there and stops the app, so it needs no init. The apphost finds
+# the runtime through the base's DOTNET_ROOT.
+ENTRYPOINT ["/app/bin/Template"]

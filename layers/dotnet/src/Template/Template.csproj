@@ -1,0 +1,19 @@
+<!-- SPDX-License-Identifier: BSD-2-Clause -->
+<!-- SPDX-FileCopyrightText: 2026 Aryan Ameri <github@aryan.ameri.coffee> -->
+
+<!--
+  The .NET layer's demo, on the shared framework alone: no PackageReference.
+  Its target framework is the one the SDK building it bundles, and that SDK
+  is the backend stage's image, so no .NET major is written here. Nor is
+  there a global.json: Renovate would move one on its own, apart from the
+  image, and a .NET major would then stand on one side alone.
+-->
+<Project Sdk="Microsoft.NET.Sdk.Web">
+
+  <PropertyGroup>
+    <TargetFramework>net$(BundledNETCoreAppTargetFrameworkVersion)</TargetFramework>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+  </PropertyGroup>
+
+</Project>
