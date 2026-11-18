@@ -337,7 +337,10 @@ func TestUsage(t *testing.T) {
 // declares, after every RUN in that stage that names /out/bin, as any RUN
 // that writes there must: the check has to read what the runtime stage
 // copies, and an ARG with no default of its own takes the one the runtime
-// stage is built FROM.
+// stage is built FROM, which a stage must be. Renovate's dockerfile
+// manager reads ARG NAME VALUE as NAME=VALUE, so no ARG line may give
+// RUNTIME_IMAGE anything after it: a name there would become the runtime
+// pin's value, and Renovate would stop moving the pin.
 func TestContainerfileRunsIt(t *testing.T) {
 	t.Parallel()
 
@@ -364,6 +367,12 @@ func TestContainerfileRunsIt(t *testing.T) {
 	}
 	if ran[0] < copied[0] {
 		t.Errorf("the Containerfile runs %s before it copies the script there", dst)
+	}
+	if !regexp.MustCompile(`(?m)^FROM \$\{RUNTIME_IMAGE\}$`).MatchString(containerfile) {
+		t.Error("no stage is built FROM ${RUNTIME_IMAGE}, so the check compares the app with an image nothing runs it on")
+	}
+	for _, line := range regexp.MustCompile(`(?m)^ARG RUNTIME_IMAGE[ \t].*$`).FindAllString(containerfile, -1) {
+		t.Errorf("Renovate reads %q as RUNTIME_IMAGE set to what follows it, and would stop moving the runtime pin: name RUNTIME_IMAGE alone, or after another name", line)
 	}
 
 	// The check's stage, from the last FROM before it to the next

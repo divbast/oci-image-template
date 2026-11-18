@@ -90,6 +90,11 @@ ARG TEMPLATE_VERSION
 # Root-owned, and never written
 COPY --from=backend /out/bin /app/bin
 COPY --from=probe /out/divbast-template /usr/local/bin/divbast-template
+# ASP.NET Core's content root, where an app's appsettings.json and wwwroot
+# sit beside its assemblies. The base's working directory is /, which as
+# the content root would hide both, and give the settings' reload watcher
+# the whole root filesystem to watch.
+WORKDIR /app/bin
 
 # The port is 8080, as every divbast image's. The base sets the same today;
 # set here, the port the contract names is this file's to say, and no
