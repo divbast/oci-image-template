@@ -8,7 +8,9 @@
 // temporary directory: the shapes dotnet publish writes and the image
 // references a pin can take, which it must pass, a .NET major on one side
 // and not the other, each way with its own steps to take, and every way
-// it can refuse.
+// it can refuse. The Containerfile must run it where it must, and the
+// check of that is seen refusing a Containerfile changed each way it could
+// be wired wrong.
 package runtimemajor
 
 import (
@@ -345,15 +347,9 @@ func TestUsage(t *testing.T) {
 	}
 }
 
-// TestContainerfileRunsIt fails unless the Containerfile copies the script
-// in and runs it over /out/bin, against the RUNTIME_IMAGE its stage
-// declares, after every RUN in that stage that names /out/bin, as any RUN
-// that writes there must: the check has to read what the runtime stage
-// copies, and an ARG with no default of its own takes the one the runtime
-// stage is built FROM, which a stage must be. Renovate's dockerfile
-// manager reads ARG NAME VALUE as NAME=VALUE, so no ARG line may give
-// RUNTIME_IMAGE anything after it: a name there would become the runtime
-// pin's value, and Renovate would stop moving the pin.
+// TestContainerfileRunsIt fails unless the layer's Containerfile runs the
+// check where it must: wiringProblems, which TestWiringProblems sees
+// refuse each way the wiring could go wrong, finds nothing wrong with it.
 func TestContainerfileRunsIt(t *testing.T) {
 	t.Parallel()
 
@@ -366,58 +362,239 @@ func TestContainerfileRunsIt(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	containerfile := string(data)
+	for _, problem := range wiringProblems(string(data)) {
+		t.Error(problem)
+	}
+}
 
+// TestWiringProblems checks wiringProblems finds nothing wrong with wired,
+// and in wired changed each way the check could be wired wrong, one
+// problem, which says what is wrong.
+func TestWiringProblems(t *testing.T) {
+	t.Parallel()
+
+	if problems := wiringProblems(wired); len(problems) != 0 {
+		t.Fatalf("wired has problems of its own, so no change to it shows one: %q", problems)
+	}
+	const (
+		backend = "FROM dhi.io/dotnet:10.0.404-sdk-debian13 AS backend\n"
+		arg     = "ARG TEMPLATE_VERSION RUNTIME_IMAGE TARGETARCH\n"
+		copied  = "COPY test/runtime-major.sh /tmp/runtime-major.sh\n"
+		output  = "--no-restore -o /out/bin\n"
+		ran     = `RUN /tmp/runtime-major.sh /out/bin "${RUNTIME_IMAGE}"` + "\n"
+		runtime = "FROM ${RUNTIME_IMAGE}\n"
+		ships   = "COPY --from=backend /out/bin /app/bin\n"
+	)
+	tests := []struct {
+		name  string
+		edits []edit
+		want  string
+	}{
+		{name: "not-copied", edits: []edit{{copied, ""}}, want: "does not COPY test/runtime-major.sh"},
+		{name: "no-image-passed", edits: []edit{{ran, "RUN /tmp/runtime-major.sh /out/bin\n"}}, want: "never runs"},
+		{
+			// A failure it would hide
+			name:  "not-alone-on-its-line",
+			edits: []edit{{ran, `RUN /tmp/runtime-major.sh /out/bin "${RUNTIME_IMAGE}" || true` + "\n"}},
+			want:  "alone on its line",
+		},
+		{name: "run-before-copied", edits: []edit{{copied, ""}, {ran, ran + copied}}, want: "before it copies the script there"},
+		{
+			name:  "runtime-not-from-the-arg",
+			edits: []edit{{runtime, "FROM dhi.io/aspnetcore:10.0.15-debian13\n"}},
+			want:  "no stage is built FROM ${RUNTIME_IMAGE}",
+		},
+		{
+			// Renovate would read the pin as TEMPLATE_VERSION
+			name:  "arg-named-first",
+			edits: []edit{{arg, "ARG RUNTIME_IMAGE TEMPLATE_VERSION TARGETARCH\n"}},
+			want:  "Renovate reads",
+		},
+		{name: "no-arg-in-the-stage", edits: []edit{{arg, "ARG TEMPLATE_VERSION TARGETARCH\n"}}, want: "declares no ARG RUNTIME_IMAGE"},
+		{
+			name:  "arg-with-a-default-of-its-own",
+			edits: []edit{{arg, "ARG TEMPLATE_VERSION TARGETARCH\nARG RUNTIME_IMAGE=dhi.io/aspnetcore:9.0.11-debian13\n"}},
+			want:  "declares no ARG RUNTIME_IMAGE",
+		},
+		{name: "arg-after-the-check", edits: moved(arg, "\nFROM dhi.io/golang"), want: "declares no ARG RUNTIME_IMAGE"},
+		{name: "nothing-published-to-out-bin", edits: []edit{{output, "--no-restore -o /out/app\n"}}, want: "no RUN before the check"},
+		{
+			name:  "out-bin-written-after-the-check",
+			edits: []edit{{ran, ran + "RUN rm /out/bin/Template.pdb\n"}},
+			want:  "a RUN after the check names /out/bin",
+		},
+		{
+			// Prowlarr's copy to /out/bin, on continued lines
+			name:  "out-bin-copied-after-the-check",
+			edits: []edit{{ran, ran + "RUN rid=$(</tmp/rid); \\\n    cp -a \"_output/${rid}/publish\" /out/bin\n"}},
+			want:  "a RUN after the check names /out/bin",
+		},
+		{name: "not-shipped", edits: []edit{{ships, ""}}, want: "ships nothing the check read"},
+		{name: "another-folder-shipped", edits: []edit{{ships, "COPY --from=backend /out /app\n"}}, want: "ships nothing the check read"},
+		{name: "shipped-from-another-stage", edits: []edit{{ships, "COPY --from=probe /out/bin /app/bin\n"}}, want: "ships nothing the check read"},
+		{
+			name:  "unnamed-stage",
+			edits: []edit{{backend, "FROM dhi.io/dotnet:10.0.404-sdk-debian13\n"}},
+			want:  "the check's stage has no name",
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
+			containerfile := changed(t, tt.edits)
+			if problems := wiringProblems(containerfile); len(problems) != 1 || !strings.Contains(problems[0], tt.want) {
+				t.Errorf("want one problem saying %q; got %q, of:\n%s", tt.want, problems, containerfile)
+			}
+		})
+	}
+}
+
+// wiringProblems returns each way containerfile fails to run the check
+// where it must, one apiece, or none. The script must be copied into a
+// build stage and run there over /out/bin, against the RUNTIME_IMAGE its
+// stage declares, after every RUN in that stage that names /out/bin, as
+// any RUN that writes there must: the check has to read what the runtime
+// stage copies. So the stage built FROM ${RUNTIME_IMAGE} must ship
+// /out/bin from the check's stage, by its name. An ARG with no default of
+// its own takes the one the runtime stage is built FROM, which a stage
+// must be. Renovate's dockerfile manager reads ARG NAME VALUE as
+// NAME=VALUE, so no ARG line may give RUNTIME_IMAGE anything after it: a
+// name there would become the runtime pin's value, and Renovate would stop
+// moving the pin.
+func wiringProblems(containerfile string) []string {
 	copied := regexp.MustCompile(`(?m)^COPY test/runtime-major\.sh (\S+)$`).FindStringSubmatchIndex(containerfile)
 	if copied == nil {
-		t.Fatal("the Containerfile does not COPY test/runtime-major.sh into a build stage")
+		return []string{"the Containerfile does not COPY test/runtime-major.sh into a build stage"}
 	}
 	dst := containerfile[copied[2]:copied[3]]
 	want := `RUN ` + dst + ` /out/bin "${RUNTIME_IMAGE}"`
 	ran := regexp.MustCompile(`(?m)^` + regexp.QuoteMeta(want) + `$`).FindStringIndex(containerfile)
 	if ran == nil {
-		t.Fatalf("the Containerfile copies the script to %s but never runs %s, alone on its line", dst, want)
+		return []string{"the Containerfile copies the script to " + dst + " but never runs " + want + ", alone on its line"}
 	}
+	var problems []string
 	if ran[0] < copied[0] {
-		t.Errorf("the Containerfile runs %s before it copies the script there", dst)
+		problems = append(problems, "the Containerfile runs "+dst+" before it copies the script there")
 	}
-	if !regexp.MustCompile(`(?m)^FROM \$\{RUNTIME_IMAGE\}$`).MatchString(containerfile) {
-		t.Error("no stage is built FROM ${RUNTIME_IMAGE}, so the check compares the app with an image nothing runs it on")
+	runtimes := regexp.MustCompile(`(?m)^FROM \$\{RUNTIME_IMAGE\}$`).FindAllStringIndex(containerfile, -1)
+	if len(runtimes) == 0 {
+		problems = append(problems, "no stage is built FROM ${RUNTIME_IMAGE}, so the check compares the app with an image nothing runs it on")
 	}
 	for _, line := range regexp.MustCompile(`(?m)^ARG RUNTIME_IMAGE[ \t].*$`).FindAllString(containerfile, -1) {
-		t.Errorf("Renovate reads %q as RUNTIME_IMAGE set to what follows it, and would stop moving the runtime pin: name RUNTIME_IMAGE alone, or after another name", line)
+		problems = append(problems, fmt.Sprintf("Renovate reads %q as RUNTIME_IMAGE set to what follows it, and would stop moving the runtime pin: name RUNTIME_IMAGE alone, or after another name", line))
 	}
 
-	// The check's stage, from the last FROM before it to the next
+	stage, at, ok := stageAt(containerfile, ran[0])
+	if !ok {
+		return append(problems, "the Containerfile runs the check before any FROM")
+	}
+	if arg := regexp.MustCompile(`(?m)^ARG (\S+ )*RUNTIME_IMAGE( \S+)*$`).FindStringIndex(stage); len(arg) == 0 || arg[0] > at {
+		problems = append(problems, "the check's stage declares no ARG RUNTIME_IMAGE, without a default of its own, before the check, which would then read another image or none")
+	}
+	wrote := false
+	for _, r := range runs.FindAllStringIndex(stage, -1) {
+		text := stage[r[0]:r[1]]
+		switch {
+		case r[0] == at || !strings.Contains(text, "/out/bin"):
+		case r[0] > at:
+			problems = append(problems, "a RUN after the check names /out/bin, so what ships may not be what it checked:\n"+text)
+		default:
+			wrote = true
+		}
+	}
+	if !wrote {
+		problems = append(problems, "no RUN before the check in its stage names /out/bin, so nothing it checks was published there")
+	}
+
+	// What the check read must be what ships
+	from, _, _ := strings.Cut(stage, "\n")
+	name := regexp.MustCompile(`^FROM (?:--\S+ )*\S+ (?i:AS) (\S+)$`).FindStringSubmatch(from)
+	if name == nil {
+		return append(problems, "the check's stage has no name, as FROM <image> AS <name> gives it, so no stage can COPY --from it what the check read")
+	}
+	ships := regexp.MustCompile(`(?m)^COPY (?:--\S+ )*--from=` + regexp.QuoteMeta(name[1]) + ` (?:--\S+ )*/out/bin/? \S+$`)
+	shipped := false
+	for _, r := range runtimes {
+		runtime, _, _ := stageAt(containerfile, r[0])
+		shipped = shipped || ships.MatchString(runtime)
+	}
+	if len(runtimes) > 0 && !shipped {
+		problems = append(problems, "the stage built FROM ${RUNTIME_IMAGE} ships nothing the check read: it has no COPY --from="+name[1]+" /out/bin")
+	}
+	return problems
+}
+
+// The instructions wiringProblems reads, each from its keyword to the end
+// of its last continued line.
+var (
+	froms = regexp.MustCompile(`(?m)^FROM `)
+	runs  = regexp.MustCompile(`(?m)^RUN (?:.*\\\n)*.*$`)
+)
+
+// stageAt returns the build stage holding offset at in containerfile, from
+// the last FROM before it up to the next FROM or the end, and at's offset
+// within it; ok is false when no FROM comes before at.
+func stageAt(containerfile string, at int) (stage string, offset int, ok bool) {
 	start, end := -1, len(containerfile)
-	for _, from := range regexp.MustCompile(`(?m)^FROM `).FindAllStringIndex(containerfile, -1) {
-		if from[0] > ran[0] {
+	for _, from := range froms.FindAllStringIndex(containerfile, -1) {
+		if from[0] > at {
 			end = from[0]
 			break
 		}
 		start = from[0]
 	}
 	if start < 0 {
-		t.Fatal("the Containerfile runs the check before any FROM")
+		return "", 0, false
 	}
-	stage, at := containerfile[start:end], ran[0]-start
+	return containerfile[start:end], at - start, true
+}
 
-	if arg := regexp.MustCompile(`(?m)^ARG (\S+ )*RUNTIME_IMAGE( \S+)*$`).FindStringIndex(stage); len(arg) == 0 || arg[0] > at {
-		t.Error("the check's stage declares no ARG RUNTIME_IMAGE, without a default of its own, before the check, which would then read another image or none")
-	}
-	wrote := false
-	for _, run := range regexp.MustCompile(`(?m)^RUN (?:.*\\\n)*.*$`).FindAllStringIndex(stage, -1) {
-		switch {
-		case run[0] == at || !strings.Contains(stage[run[0]:run[1]], "/out/bin"):
-		case run[0] > at:
-			t.Errorf("a RUN after the check names /out/bin, so what ships may not be what it checked:\n%s", stage[run[0]:run[1]])
-		default:
-			wrote = true
+// wired is a Containerfile that runs both checks where they must, as the
+// layer's does, for TestWiringProblems to change one way at a time.
+const wired = `ARG RUNTIME_IMAGE=dhi.io/aspnetcore:10.0.15-debian13
+
+FROM dhi.io/dotnet:10.0.404-sdk-debian13 AS backend
+ARG TEMPLATE_VERSION RUNTIME_IMAGE TARGETARCH
+WORKDIR /src
+COPY src/ ./
+COPY test/global-json.sh /tmp/global-json.sh
+COPY test/runtime-major.sh /tmp/runtime-major.sh
+RUN sdk=$(cd / && dotnet --version); /tmp/global-json.sh global.json "${sdk}"
+RUN dotnet restore Template/Template.csproj -r linux-x64
+RUN --network=none dotnet publish Template/Template.csproj -r linux-x64 \
+    --self-contained false --no-restore -o /out/bin
+RUN /tmp/runtime-major.sh /out/bin "${RUNTIME_IMAGE}"
+
+FROM dhi.io/golang:1.27.4-debian13-dev AS probe
+RUN go build -o /out/divbast-template ./cmd/divbast-template
+
+FROM ${RUNTIME_IMAGE}
+COPY --from=backend /out/bin /app/bin
+COPY --from=probe /out/divbast-template /usr/local/bin/divbast-template
+ENTRYPOINT ["/app/bin/Template"]
+`
+
+// edit replaces from, which must occur once, with to.
+type edit struct{ from, to string }
+
+// moved is the edits that move line, a whole one, to just before before.
+func moved(line, before string) []edit {
+	return []edit{{line, ""}, {before, line + before}}
+}
+
+// changed is wired with each edit made in turn.
+func changed(t *testing.T, edits []edit) string {
+	t.Helper()
+
+	containerfile := wired
+	for _, e := range edits {
+		if n := strings.Count(containerfile, e.from); n != 1 {
+			t.Fatalf("%q occurs %d times, want once, in:\n%s", e.from, n, containerfile)
 		}
+		containerfile = strings.Replace(containerfile, e.from, e.to, 1)
 	}
-	if !wrote {
-		t.Error("no RUN before the check in its stage names /out/bin, so nothing it checks was published there")
-	}
+	return containerfile
 }
 
 // framework is a runtimeconfig naming the ASP.NET Core framework at

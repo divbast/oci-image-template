@@ -7,7 +7,9 @@
 // as an upstream ships it and the shapes a release might give it, which it
 // must rewrite, a source with none, which it must leave alone, and every
 // way it can refuse, a .NET major on one side and not the other among
-// them, each seen refusing with the file left as it was.
+// them, each seen refusing with the file left as it was. The
+// Containerfile must run it where it must, and the check of that is seen
+// refusing a Containerfile changed each way it could be wired wrong.
 package globaljson
 
 import (
@@ -326,10 +328,9 @@ func TestUsage(t *testing.T) {
 	}
 }
 
-// TestContainerfileRunsIt fails unless the Containerfile copies the script
-// in and runs it over global.json, against the SDK the stage's image
-// reports from /, where no global.json is in the way, before the first
-// dotnet command, which is the first thing that reads global.json.
+// TestContainerfileRunsIt fails unless the layer's Containerfile runs the
+// check where it must: wiringProblems, which TestWiringProblems sees
+// refuse each way the wiring could go wrong, finds nothing wrong with it.
 func TestContainerfileRunsIt(t *testing.T) {
 	t.Parallel()
 
@@ -342,28 +343,225 @@ func TestContainerfileRunsIt(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	containerfile := string(data)
+	for _, problem := range wiringProblems(string(data)) {
+		t.Error(problem)
+	}
+}
 
+// TestWiringProblems checks wiringProblems finds nothing wrong with wired,
+// and in wired changed each way the check could be wired wrong, one
+// problem, which says what is wrong.
+func TestWiringProblems(t *testing.T) {
+	t.Parallel()
+
+	if problems := wiringProblems(wired); len(problems) != 0 {
+		t.Fatalf("wired has problems of its own, so no change to it shows one: %q", problems)
+	}
+	const (
+		source  = "COPY src/ ./\n"
+		copied  = "COPY test/global-json.sh /tmp/global-json.sh\n"
+		ran     = `RUN sdk=$(cd / && dotnet --version); /tmp/global-json.sh global.json "${sdk}"` + "\n"
+		restore = "RUN dotnet restore Template/Template.csproj -r linux-x64\n"
+		publish = "RUN --network=none dotnet publish Template/Template.csproj -r linux-x64 \\\n    --self-contained false --no-restore -o /out/bin\n"
+	)
+	tests := []struct {
+		name  string
+		edits []edit
+		want  string
+	}{
+		{name: "not-copied", edits: []edit{{copied, ""}}, want: "does not COPY test/global-json.sh"},
+		{
+			// The one-argument form, which checks no SDK
+			name:  "no-sdk-passed",
+			edits: []edit{{ran, "RUN /tmp/global-json.sh global.json\n"}},
+			want:  "never runs",
+		},
+		{
+			// Asked from the source, dotnet answers as its global.json says
+			name:  "sdk-asked-from-the-source",
+			edits: []edit{{ran, `RUN sdk=$(dotnet --version); /tmp/global-json.sh global.json "${sdk}"` + "\n"}},
+			want:  "never runs",
+		},
+		{name: "run-before-copied", edits: moved(ran, copied), want: "before it copies the script there"},
+		{
+			// The check finds no global.json, says so and stands down
+			name:  "source-after-the-check",
+			edits: moved(source, restore),
+			want:  "after the check, which then ran without it:\nCOPY src/ ./",
+		},
+		{
+			// An app's fetch stage, as Prowlarr's
+			name:  "fetched-source-after-the-check",
+			edits: []edit{{source, ""}, {restore, "COPY --from=fetch /src ./\n" + restore}},
+			want:  "after the check, which then ran without it:\nCOPY --from=fetch /src ./",
+		},
+		{
+			name:  "source-added-after-the-check",
+			edits: []edit{{source, ""}, {restore, "ADD src/ ./\n" + restore}},
+			want:  "after the check, which then ran without it:\nADD src/ ./",
+		},
+		{name: "no-source", edits: []edit{{source, ""}}, want: "nothing but the scripts"},
+		{name: "dotnet-before-the-check", edits: moved(restore, ran), want: "runs dotnet before it checks"},
+		{
+			// dotnet after other commands in one RUN
+			name:  "dotnet-later-in-a-run-before-the-check",
+			edits: []edit{{ran, `RUN rid=linux-x64; dotnet restore Template/Template.csproj -r "${rid}"` + "\n" + ran}},
+			want:  "runs dotnet before it checks",
+		},
+		{
+			name:  "dotnet-on-a-continued-line-before-the-check",
+			edits: []edit{{ran, "RUN rid=linux-x64; \\\n    dotnet restore Template/Template.csproj -r \"${rid}\"\n" + ran}},
+			want:  "runs dotnet before it checks",
+		},
+		{name: "no-dotnet-after-the-check", edits: []edit{{restore, ""}, {publish, ""}}, want: "runs no dotnet command after the check"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
+			containerfile := changed(t, tt.edits)
+			if problems := wiringProblems(containerfile); len(problems) != 1 || !strings.Contains(problems[0], tt.want) {
+				t.Errorf("want one problem saying %q; got %q, of:\n%s", tt.want, problems, containerfile)
+			}
+		})
+	}
+}
+
+// wiringProblems returns each way containerfile fails to run the check
+// where it must, one apiece, or none. The script must be copied into a
+// build stage and run there over global.json, against the SDK the stage's
+// image reports from /, where no global.json is in the way. It must run
+// once the source is in place: every COPY and ADD in its stage but the
+// scripts' comes before it, and there is one, since over a source not yet
+// there it would find no global.json, say so and stand down. And it must
+// run before any RUN that names dotnet, the first thing to read
+// global.json.
+func wiringProblems(containerfile string) []string {
 	copied := regexp.MustCompile(`(?m)^COPY test/global-json\.sh (\S+)$`).FindStringSubmatchIndex(containerfile)
 	if copied == nil {
-		t.Fatal("the Containerfile does not COPY test/global-json.sh into a build stage")
+		return []string{"the Containerfile does not COPY test/global-json.sh into a build stage"}
 	}
 	dst := containerfile[copied[2]:copied[3]]
 	want := `RUN sdk=$(cd / && dotnet --version); ` + dst + ` global.json "${sdk}"`
 	ran := regexp.MustCompile(`(?m)^` + regexp.QuoteMeta(want) + `$`).FindStringIndex(containerfile)
 	if ran == nil {
-		t.Fatalf("the Containerfile copies the script to %s but never runs %s", dst, want)
+		return []string{"the Containerfile copies the script to " + dst + " but never runs " + want}
 	}
+	var problems []string
 	if ran[0] < copied[0] {
-		t.Errorf("the Containerfile runs %s before it copies the script there", dst)
+		problems = append(problems, "the Containerfile runs "+dst+" before it copies the script there")
 	}
-	dotnet := regexp.MustCompile(`(?m)^RUN (--\S+ )*dotnet `).FindStringIndex(containerfile)
-	if dotnet == nil {
-		t.Fatal("the Containerfile runs no dotnet command, so this test no longer knows what must follow the check")
+
+	stage, at, ok := stageAt(containerfile, ran[0])
+	if !ok {
+		return append(problems, "the Containerfile runs the check before any FROM")
 	}
-	if ran[0] > dotnet[0] {
-		t.Error("the Containerfile runs dotnet before it checks and rewrites global.json")
+	sources, late := 0, 0
+	for _, c := range copies.FindAllStringIndex(stage, -1) {
+		text := stage[c[0]:c[1]]
+		switch {
+		case scriptCopy.MatchString(text):
+		case c[0] > at:
+			late++
+			problems = append(problems, "the check's stage copies this in after the check, which then ran without it:\n"+text)
+		default:
+			sources++
+		}
 	}
+	if sources+late == 0 {
+		problems = append(problems, "the check's stage copies in nothing but the scripts, so the check finds no global.json and stands down")
+	}
+
+	after := false
+	for _, r := range runs.FindAllStringIndex(containerfile, -1) {
+		text := containerfile[r[0]:r[1]]
+		switch {
+		case r[0] == ran[0] || !dotnet.MatchString(text):
+		case r[0] < ran[0]:
+			problems = append(problems, "the Containerfile runs dotnet before it checks and rewrites global.json:\n"+text)
+		default:
+			after = true
+		}
+	}
+	if !after {
+		problems = append(problems, "the Containerfile runs no dotnet command after the check, so this test no longer knows what must follow the check")
+	}
+	return problems
+}
+
+// The instructions wiringProblems reads, each from its keyword to the end
+// of its last continued line, and what it looks for in them.
+var (
+	froms      = regexp.MustCompile(`(?m)^FROM `)
+	runs       = regexp.MustCompile(`(?m)^RUN (?:.*\\\n)*.*$`)
+	copies     = regexp.MustCompile(`(?m)^(?:COPY|ADD) (?:.*\\\n)*.*$`)
+	scriptCopy = regexp.MustCompile(`^COPY (?:--\S+ )*(?:test/[^\s/]+\.sh )+\S+$`)
+	dotnet     = regexp.MustCompile(`\bdotnet\b`)
+)
+
+// stageAt returns the build stage holding offset at in containerfile, from
+// the last FROM before it up to the next FROM or the end, and at's offset
+// within it; ok is false when no FROM comes before at.
+func stageAt(containerfile string, at int) (stage string, offset int, ok bool) {
+	start, end := -1, len(containerfile)
+	for _, from := range froms.FindAllStringIndex(containerfile, -1) {
+		if from[0] > at {
+			end = from[0]
+			break
+		}
+		start = from[0]
+	}
+	if start < 0 {
+		return "", 0, false
+	}
+	return containerfile[start:end], at - start, true
+}
+
+// wired is a Containerfile that runs both checks where they must, as the
+// layer's does, for TestWiringProblems to change one way at a time.
+const wired = `ARG RUNTIME_IMAGE=dhi.io/aspnetcore:10.0.15-debian13
+
+FROM dhi.io/dotnet:10.0.404-sdk-debian13 AS backend
+ARG TEMPLATE_VERSION RUNTIME_IMAGE TARGETARCH
+WORKDIR /src
+COPY src/ ./
+COPY test/global-json.sh /tmp/global-json.sh
+COPY test/runtime-major.sh /tmp/runtime-major.sh
+RUN sdk=$(cd / && dotnet --version); /tmp/global-json.sh global.json "${sdk}"
+RUN dotnet restore Template/Template.csproj -r linux-x64
+RUN --network=none dotnet publish Template/Template.csproj -r linux-x64 \
+    --self-contained false --no-restore -o /out/bin
+RUN /tmp/runtime-major.sh /out/bin "${RUNTIME_IMAGE}"
+
+FROM dhi.io/golang:1.27.4-debian13-dev AS probe
+RUN go build -o /out/divbast-template ./cmd/divbast-template
+
+FROM ${RUNTIME_IMAGE}
+COPY --from=backend /out/bin /app/bin
+COPY --from=probe /out/divbast-template /usr/local/bin/divbast-template
+ENTRYPOINT ["/app/bin/Template"]
+`
+
+// edit replaces from, which must occur once, with to.
+type edit struct{ from, to string }
+
+// moved is the edits that move line, a whole one, to just before before.
+func moved(line, before string) []edit {
+	return []edit{{line, ""}, {before, line + before}}
+}
+
+// changed is wired with each edit made in turn.
+func changed(t *testing.T, edits []edit) string {
+	t.Helper()
+
+	containerfile := wired
+	for _, e := range edits {
+		if n := strings.Count(containerfile, e.from); n != 1 {
+			t.Fatalf("%q occurs %d times, want once, in:\n%s", e.from, n, containerfile)
+		}
+		containerfile = strings.Replace(containerfile, e.from, e.to, 1)
+	}
+	return containerfile
 }
 
 // fixture writes content to a new file, and returns its path.
