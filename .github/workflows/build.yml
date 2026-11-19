@@ -39,7 +39,7 @@ concurrency:
 jobs:
   check:
     name: check
-    uses: divbast/ci/.github/workflows/app-check.yml@9d5f86eb1d8e057221661adfbfe92bb8bc379ae5 # v4.0.0
+    uses: divbast/ci/.github/workflows/app-check.yml@ac91b2e405db7c31cb267e6998ec71aceac4f29a # v4.2.0
     with:
       # PHPStan over the PHP layer: a Go or .NET app made from the template
       # drops this with layers/php
@@ -90,7 +90,7 @@ jobs:
     if: >-
       github.ref == 'refs/heads/main'
       && (github.event_name == 'schedule' || github.event_name == 'workflow_dispatch')
-    uses: divbast/ci/.github/workflows/app-publish.yml@9d5f86eb1d8e057221661adfbfe92bb8bc379ae5 # v4.0.0
+    uses: divbast/ci/.github/workflows/app-publish.yml@ac91b2e405db7c31cb267e6998ec71aceac4f29a # v4.2.0
     with:
       image: ghcr.io/divbast/oci-image-template
       version-arg: TEMPLATE_VERSION
