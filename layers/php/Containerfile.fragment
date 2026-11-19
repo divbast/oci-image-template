@@ -21,7 +21,7 @@ FROM ${RUNTIME_IMAGE}
 # FROM ${RUNTIME_IMAGE}. The binary divbast/frankenphp builds, by digest:
 # CI refuses it unless that repository's own build on main attested it.
 # Name the image here and nowhere else.
-COPY --from=ghcr.io/divbast/frankenphp:baikal@sha256:e4639370f8aac7cc1c16d4babbcbd2405a837bde2681d0f99d825def3d4fc41f --chmod=0755 /frankenphp /usr/local/bin/frankenphp
+COPY --from=ghcr.io/divbast/frankenphp:baikal@sha256:701cae2096cfc970b37a42b7f432da319b5babe87b1317cdd5b842c9d7bd58b3 --chmod=0755 /frankenphp /usr/local/bin/frankenphp
 
 # Root-owned, and never written: everything that changes lives on /tmp. No
 # --chmod on these, because COPY gives a directory it creates the file's
