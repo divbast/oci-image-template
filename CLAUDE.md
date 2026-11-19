@@ -354,7 +354,7 @@ target framework follows its SDK, and no upstream waits on it.
 
 - **`mise.toml` is where tool versions are written.** Go, golangci-lint,
   hadolint, ShellCheck, shfmt, actionlint, reuse, just, pinact, trivy,
-  zizmor and cosign are all listed there. Every justfile recipe but `setup`, which
+  grype, zizmor and cosign are all listed there. Every justfile recipe but `setup`, which
   installs them, runs through `mise exec`, so a recipe resolves those
   binaries and not a same-named one on PATH. The recipes that call GitHub,
   pinact's and zizmor's, take a fine-grained token from `GITHUB_TOKEN` and
