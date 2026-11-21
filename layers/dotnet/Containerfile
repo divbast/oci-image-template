@@ -18,10 +18,10 @@ ARG TEMPLATE_VERSION=0.2.0
 # backend's SDK in one PR, and holds a .NET major for the Dependency
 # Dashboard. CI verifies its signature by Docker before anything is built,
 # as it does every stage's image below.
-ARG RUNTIME_IMAGE=dhi.io/aspnetcore:10.0.15-debian13@sha256:1ad26fbaa8e691c9ea7d880279aabfeafe7abb430913f60abd595bba6a221e69
+ARG RUNTIME_IMAGE=dhi.io/aspnetcore:10.0.15-debian13@sha256:32da7210ddb103b62a37b69b1fa6984ca8fa80d2904ddc2df139c012dfd86dae
 
 # The backend, framework-dependent for this stage's own architecture.
-FROM dhi.io/dotnet:10.0.404-sdk-debian13@sha256:ec51da4084bed110f23ad30481bede5dd42e0bc38caa90ec30641cb4fd1ef248 AS backend
+FROM dhi.io/dotnet:10.0.404-sdk-debian13@sha256:adbff582eff9bb2e924e6e3412e41a36df1cda05da4886183d2d80071ea1cc22 AS backend
 # RUNTIME_IMAGE with no default of its own takes the one above, which the
 # runtime stage is built FROM, for the check after publish
 ARG TEMPLATE_VERSION RUNTIME_IMAGE TARGETARCH
