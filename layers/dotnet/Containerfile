@@ -72,7 +72,7 @@ RUN --network=none dotnet publish Template/Template.csproj -c Release -r "$(</tm
 RUN /tmp/runtime-major.sh /out/bin "${RUNTIME_IMAGE}"
 
 # The image's health probe, static and on the standard library alone.
-FROM dhi.io/golang:1.27.4-debian13-dev@sha256:36a82d8f47f767eeaedee0a4d9d048c73e72144dd40f7956a4d7c76d3341bfad AS probe
+FROM dhi.io/golang:1.27.4-debian13-dev@sha256:6abf5b6dea0a290cf7851c88effd403bd12acacaf4cee8b88a19de297eaba4ad AS probe
 ARG TEMPLATE_VERSION
 WORKDIR /src
 # go.mod's replace names ./.ci, which the build context leaves out: the
