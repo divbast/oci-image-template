@@ -21,7 +21,7 @@ ARG TEMPLATE_VERSION=0.2.0
 ARG RUNTIME_IMAGE=dhi.io/aspnetcore:10.0.15-debian13@sha256:eb133a7e0d3451d528b451326b538460466bfdc6b86cc274a2e290f4ef128d92
 
 # The backend, framework-dependent for this stage's own architecture.
-FROM dhi.io/dotnet:10.0.404-sdk-debian13@sha256:fbeb40422cdfd44339fb5fe953828668182d4f2c79920cb0fb0082642c869e43 AS backend
+FROM dhi.io/dotnet:10.0.404-sdk-debian13@sha256:711001f2c5bef9b6ce3d6d66847e5c81348b623ff05f515169c0007d11394230 AS backend
 # RUNTIME_IMAGE with no default of its own takes the one above, which the
 # runtime stage is built FROM, for the check after publish
 ARG TEMPLATE_VERSION RUNTIME_IMAGE TARGETARCH
