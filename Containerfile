@@ -10,7 +10,7 @@ ARG TEMPLATE_VERSION=0.2.0
 ARG RUNTIME_IMAGE=gcr.io/distroless/static-debian13:nonroot@sha256:8ce6dd87e9823c5b48dcfb2c8604714ccb351ce59607327bcc4957448da279b5
 
 # The newest stable Go, by digest. Only the binary leaves this stage.
-FROM golang:1.27.4-trixie@sha256:f18c3d73a184fb0582828510722e723b63a93f7188d11dd223d9be6f6880e65d AS build
+FROM golang:1.27.4-trixie@sha256:430985542100b871e108ccc00e8dcc5eef08ca14ee5825e98ebf563d8ffec4ee AS build
 ARG TEMPLATE_VERSION
 WORKDIR /src
 # go.mod's replace names ./.ci, which the build context leaves out: the app
