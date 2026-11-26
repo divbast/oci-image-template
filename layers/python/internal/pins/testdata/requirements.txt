@@ -4,7 +4,7 @@
 # The kinds of line an upstream's requirements.txt holds, for the tests:
 # pins, a range, a package with no version beside its pin, comments, and
 # markers for Linux, Windows, macOS and older Pythons
-sabctools==10.0.0
+sabctools==10.4.0
 httptools==0.9.0
 CT3==3.4.0.post5
 cryptography>=3.0
