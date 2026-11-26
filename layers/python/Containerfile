@@ -1,0 +1,197 @@
+# SPDX-License-Identifier: BSD-2-Clause
+# SPDX-FileCopyrightText: 2026 Aryan Ameri <github@aryan.ameri.coffee>
+
+# The template's Python app, as a whole Containerfile: what an app on
+# Docker Hardened Images' Python puts in place of the Go app's, lifted from
+# sabnzbd-oci-image's. It is linted here and never built. README.md's step
+# 0 moves it over the root Containerfile, so it is written for the layout
+# after that move: go.mod, cmd/, internal/, app/, python/ and test/ at the
+# repository's root.
+
+# The app's own version, which tags the image: app-publish.yml reads it from
+# this line, by the name build.yml gives as version-arg. The probe carries
+# it too. An app built from an upstream pins the upstream's tag here, and
+# the commit the tag names in an ARG beneath it, which its fetch stage
+# checks out and divbast-pins reads, as SABnzbd's SABNZBD_COMMIT.
+ARG TEMPLATE_VERSION=0.2.0
+# The runtime: Docker Hardened Images' Python on Debian 13, with no shell,
+# no package manager, its nonroot user 65532, and pip, setuptools and wheel,
+# which DHI ships in it and nothing here runs. The app runs on its Python,
+# from a venv the -dev image's Python of the same release builds: Renovate
+# moves the two in one PR, and divbast-pins fails if they differ. Its
+# version is also the Python the locks are generated for. CI verifies its
+# signature by Docker before anything is built, as it does every stage's
+# image below.
+ARG RUNTIME_IMAGE=dhi.io/python:3.15.2-debian13@sha256:c6c9414d78bd285be1a4dacfb94ae61732c77019605b1678792823e319b720f6
+
+FROM ${RUNTIME_IMAGE} AS runtime
+
+# The tools every build stage below uses, from DHI's own repository alone:
+# Debian's sources are deleted first, so apt takes nothing DHI does not
+# build, and fails on anything it lacks rather than falling back. Each
+# package is pinned, one name=version a line, to DHI's build, which
+# SABnzbd's Renovate manager reads; DHI deletes a superseded build, so a
+# pin can fail the build until Renovate's PR moves it. The C and Rust
+# compilers, and git and gpg for an upstream's fetch, sit idle for the
+# demo, which has no package to build. Python's headers come with the image.
+FROM dhi.io/python:3.15.2-debian13-dev@sha256:c73e2cb9e8d56cfab7f01b99f67b2c830e84e7397dfe666d8bfaf5a69ad0ce85 AS toolchain
+SHELL ["/bin/bash", "-euo", "pipefail", "-c"]
+RUN rm /etc/apt/sources.list.d/debian.sources \
+    && apt-get update \
+    && apt-get install -y --no-install-recommends \
+        binutils=2.44-3+deb13u0+dhi10 \
+        cargo=1.100.0-4 \
+        curl=8.14.1-2+deb13u7+dhi1 \
+        g++=4:14.2.0-1+deb13u0+dhi0 \
+        gcc=4:14.2.0-1+deb13u0+dhi0 \
+        git=1:2.47.3-0+deb13u1+dhi3 \
+        gpg=2.4.7-21+deb13u1+dhi5 \
+        gpg-agent=2.4.7-21+deb13u1+dhi5 \
+        gzip=1.13-1+deb13u1+dhi1 \
+        libffi-dev=3.4.8-2+deb13u0+dhi2 \
+        libssl-dev=3.5.9-1~deb13u1+dhi2 \
+        make=4.4.1-2+deb13u0+dhi1 \
+        pkgconf=1.8.1-4+deb13u0+dhi1 \
+        rustc=1.100.0-4 \
+    && rm -rf /var/lib/apt/lists/*
+
+# The app's tree, at the path it has in the runtime. The demo is the
+# repository's own app/. An app built from an upstream replaces this COPY
+# with SABnzbd's fetch: the commit fetched by its hash, its signature
+# checked against the release key in keys/, the tag checked to still name
+# it, and .git removed, with each fetch retried.
+FROM toolchain AS fetch
+COPY app/ /app/template/
+
+# A frontend an app builds, as Lidarr's, goes in a stage of its own here,
+# on DHI's node -dev image, and its output is copied into the app's tree.
+
+# The Python packages, from requirements.lock: the pure ones from their
+# wheels, and those with C or Rust code built from source here, against
+# DHI's OpenSSL and libraries. Every file is first fetched by the URL and
+# checked against the sha256 files.txt names, with curl and sha256sum, so
+# no package's code runs while the network is on: pip download would run
+# each source release's build backend to read its metadata. The Rust
+# crates of each source release that carries a Cargo.lock are fetched with
+# it, by cargo, which checks each against that Cargo.lock. Each fetch gets
+# three retries, 10s, 30s and 90s apart, so one dropped connection does
+# not cost the daily slot.
+FROM toolchain AS deps
+COPY python/files.txt python/requirements.lock python/build.lock /src/python/
+SHELL ["/bin/bash", "-euo", "pipefail", "-c"]
+RUN retry() { \
+        for delay in 10 30 90; do "$@" && return 0; sleep "${delay}"; done; \
+        "$@"; \
+    }; \
+    shopt -s nullglob; \
+    install -d /dl; \
+    sed '/^#/d' /src/python/files.txt | while read -r sha url; do \
+        retry curl -fsSL --proto '=https' --tlsv1.2 -o "/dl/${url##*/}" "${url}"; \
+        echo "${sha}  /dl/${url##*/}" | sha256sum -c --quiet -; \
+    done; \
+    export CARGO_HOME=/cargo; \
+    for sdist in /dl/*.tar.gz; do \
+        listing=$(tar -tzf "${sdist}"); \
+        top=${listing%%/*}; \
+        if grep -qx "${top}/Cargo.lock" <<<"${listing}"; then \
+            tar -xzf "${sdist}" -C /tmp "${top}/Cargo.toml" "${top}/Cargo.lock"; \
+            tar -xzf "${sdist}" -C /tmp --wildcards "${top}/src/*" 2>/dev/null || true; \
+            retry cargo fetch --locked --manifest-path "/tmp/${top}/Cargo.toml"; \
+            rm -rf "/tmp/${top:?}"; \
+        fi; \
+    done
+# The build backends, from build.lock, into a venv of their own, which
+# never ships. Then, with no network at all, every source release into a
+# wheel. --check-build-dependencies holds each build to what its
+# pyproject.toml asks for, from that venv, whose bin/ comes first on PATH,
+# since some backends, as maturin and cmake, are run as programs. A
+# package whose build calls another's code, as cryptography's calls cffi,
+# needs that one built and installed into the build venv first, as
+# SABnzbd's deps stage does. A Rust crate that links OpenSSL takes DHI's,
+# never one it vendors.
+RUN --network=none python3 -m venv /opt/build \
+    && /opt/build/bin/pip install --no-index --find-links /dl --no-deps --require-hashes -r /src/python/build.lock
+RUN --network=none PATH="/opt/build/bin:${PATH}" CARGO_HOME=/cargo CARGO_NET_OFFLINE=true OPENSSL_NO_VENDOR=1 \
+    /opt/build/bin/pip wheel --no-index --find-links /dl --no-deps --no-build-isolation --check-build-dependencies \
+        --require-hashes -w /wheels -r /src/python/requirements.lock
+# The app's venv, at the path it has in the runtime, with no pip of its
+# own: every wheel installed into it by the build venv's pip, when there is
+# one, as the demo has none, then pip's own check that each package's
+# requirements are met there.
+RUN --network=none python3 -m venv --without-pip /app/venv \
+    && shopt -s nullglob \
+    && wheels=(/wheels/*.whl) \
+    && if ((${#wheels[@]})); then \
+        /opt/build/bin/pip --python /app/venv/bin/python install --no-index --no-deps "${wheels[@]}"; \
+    fi \
+    && /opt/build/bin/pip --python /app/venv/bin/python check \
+    && site=$(/app/venv/bin/python -c 'import sysconfig; print(sysconfig.get_path("purelib"))') \
+    && for tool in pip setuptools wheel; do \
+        if [[ -e "${site}/${tool}" ]]; then echo "ERROR: the venv holds ${tool}" >&2; exit 1; fi; \
+    done
+# Bytecode for -OO, compiled now since the root is read-only at run time.
+# A hash-based .pyc that is never checked against its source needs no
+# timestamp, so the same sources give the same files.
+COPY --from=fetch /app/template /app/template
+RUN --network=none python3 -m compileall -q -j0 -o 2 --invalidation-mode unchecked-hash /app/venv/lib /app/template
+
+# A native tool the app runs, as SABnzbd's unrar and 7zz, goes in a stage
+# of its own here, FROM toolchain: from its source, held to a sha256 or a
+# commit, linked to the runtime's libraries, hardened, and checked with
+# SABnzbd's check-elf. No image scan can see such a binary, so the app
+# also writes an SBOM of it, in a stage of its own, from the same ARGs,
+# and names the file in the io.github.divbast.scan.sboms label below,
+# which divbast/ci's scan reads.
+
+# The image's health probe, static and on the standard library alone.
+FROM dhi.io/golang:1.27.4-debian13-dev@sha256:121afb8b390b1d6babba8cd0a93eaf2ffa3735f835d388b9d79c2be38b41ee4f AS probe
+ARG TEMPLATE_VERSION
+WORKDIR /src
+# go.mod's replace names ./.ci, which the build context leaves out: the
+# probe imports nothing from divbast/ci, so Go never looks for it
+COPY go.mod ./
+COPY cmd/divbast-template/ cmd/divbast-template/
+COPY internal/probe/ internal/probe/
+RUN CGO_ENABLED=0 GOFLAGS=-mod=readonly GOTOOLCHAIN=local \
+    go build -trimpath -ldflags "-s -w -X main.version=${TEMPLATE_VERSION}" \
+    -o /out/divbast-template ./cmd/divbast-template
+
+FROM runtime
+ARG TEMPLATE_VERSION
+
+# Root-owned, and never written
+COPY --from=deps /app/venv /app/venv
+COPY --from=deps /app/template /app/template
+COPY --from=probe /out/divbast-template /usr/local/bin/divbast-template
+
+# UTF-8 for the app; no .pyc written at run time, on a read-only root,
+# which the build compiled already; and each log line to the engine as it
+# is written.
+ENV LC_ALL=C.UTF-8 \
+    PYTHONDONTWRITEBYTECODE=1 \
+    PYTHONUNBUFFERED=1
+
+# An app adds the licences of everything it ships beyond its base: its
+# own, its upstream's, and each Python package's, which its dist-info
+# names; and, when it writes one, the io.github.divbast.scan.sboms label.
+LABEL org.opencontainers.image.source="https://github.com/divbast/oci-image-template" \
+    org.opencontainers.image.url="https://github.com/divbast/oci-image-template" \
+    org.opencontainers.image.title="oci-image-template" \
+    org.opencontainers.image.version="${TEMPLATE_VERSION}" \
+    org.opencontainers.image.licenses="BSD-2-Clause"
+
+EXPOSE 8080
+# Exec form: the shell form would need /bin/sh, which the image lacks.
+# --timeout must clear divbast-template health's own budget: it allows each
+# of its two exchanges 4 s and runs them one after the other, so a listener
+# that accepts and never answers costs 8 s. A shorter timeout kills the
+# probe mid-flight and records a bare engine timeout instead of the probe's
+# own line, which is the only diagnostic there is. Podman reads no
+# HEALTHCHECK from an image published as an OCI index: its users pass the
+# same array as --health-cmd.
+HEALTHCHECK --interval=30s --timeout=10s --start-period=60s --retries=3 \
+    CMD ["/usr/local/bin/divbast-template", "health"]
+USER 65532:65532
+# The app itself runs as PID 1, with nothing before it: the demo handles
+# SIGTERM and stops. -OO matches the bytecode the build compiled.
+ENTRYPOINT ["/app/venv/bin/python", "-OO", "/app/template/server.py"]

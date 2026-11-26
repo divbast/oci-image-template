@@ -1,0 +1,14 @@
+# SPDX-License-Identifier: BSD-2-Clause
+# SPDX-FileCopyrightText: 2026 Aryan Ameri <github@aryan.ameri.coffee>
+
+# The Python packages the app installs, which go run ./cmd/divbast-pins
+# locks into requirements.lock, with each file's sha256. The demo needs
+# none. An app lists its own here, one a line, pinned with == or not, with
+# any environment marker. An app built from an upstream that ships a
+# requirements.txt names that file here alone instead, by one -r line, at
+# the commit its Containerfile builds, as an ARG:
+#
+#   -r https://raw.githubusercontent.com/<owner>/<app>/${APP_COMMIT}/requirements.txt
+#
+# Nothing resolves dependencies: every package the image installs is named
+# here, or in pins.txt, and pip check fails the build on one that is not.

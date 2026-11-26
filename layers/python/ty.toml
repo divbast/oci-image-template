@@ -1,0 +1,10 @@
+# SPDX-License-Identifier: BSD-2-Clause
+# SPDX-FileCopyrightText: 2026 Aryan Ameri <github@aryan.ameri.coffee>
+
+# ty, for the Python layer's own code, checked against the Python the
+# runtime image runs, with every warning an error.
+[environment]
+python-version = "3.15"
+
+[terminal]
+error-on-warning = true

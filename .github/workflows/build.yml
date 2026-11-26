@@ -49,10 +49,12 @@ jobs:
       # Images. An app whose divbast/infra entry has no dhi = true reads
       # both empty, and ci skips the login.
       dhi-username: ${{ vars.DHI_USERNAME }}
-      # The .NET layer's images, which the lint verifies before it runs
-      # any. README.md's "Making a new app", step 0, drops this with
+      # The .NET and Python layers' images, which the lint verifies before
+      # it runs any. README.md's "Making a new app", step 0, drops this with
       # layers/.
-      verify-containerfiles: layers/dotnet/Containerfile
+      verify-containerfiles: |
+        layers/dotnet/Containerfile
+        layers/python/Containerfile
     secrets:
       DHI_TOKEN: ${{ secrets.DHI_TOKEN }}
     permissions:

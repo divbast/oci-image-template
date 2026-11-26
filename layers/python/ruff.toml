@@ -1,0 +1,30 @@
+# SPDX-License-Identifier: BSD-2-Clause
+# SPDX-FileCopyrightText: 2026 Aryan Ameri <github@aryan.ameri.coffee>
+
+# ruff, for the Python layer's own code: every rule, as golangci.yml holds
+# the Go code, but for the few that contradict another or ruff format.
+# Each ignore says why; a suppression in the code says why beside it.
+target-version = "py315"
+line-length = 120
+
+[lint]
+select = ["ALL"]
+ignore = [
+    # ruff format adds and removes trailing commas itself, and ruff's own
+    # documentation lists these two as conflicting with it
+    "COM812",
+    "ISC001",
+    # pydocstyle's two choices of each pair: D211 (no blank line before a
+    # class's docstring) and D212 (the summary on the first line) are kept
+    "D203",
+    "D213",
+]
+
+[lint.per-file-ignores]
+# The demo is a script the image runs by its path, not a package anything
+# imports, so it has no __init__.py
+"app/server.py" = ["INP001"]
+
+[lint.flake8-copyright]
+# Every file's notice is its REUSE header
+notice-rgx = "SPDX-FileCopyrightText: \\d{4}"
