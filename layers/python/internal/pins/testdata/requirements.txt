@@ -15,7 +15,7 @@ pycparser==3.12
 more-itertools  # any version, pinned below
 more-itertools==11.2.1
 notify2==0.3.1; sys_platform == 'linux'
-dbus-python==1.4.0; sys_platform == 'linux' and python_version < '3.10'
+dbus-python==1.5.1; sys_platform == 'linux' and python_version < '3.10'
 pygobject==3.50.0; platform_system == 'Linux' and python_version < '3.10'
 pywin32==312; sys_platform == 'win32'
 winrt-runtime==3.2.1; sys_platform == 'win32'
