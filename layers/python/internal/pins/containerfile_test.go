@@ -13,9 +13,9 @@ import (
 const containerfile = `# The app
 ARG APP_VERSION=1.2.0
 ARG APP_COMMIT=ffc619947b5ba4e6520e3a0bc70680024e184b2f
-ARG RUNTIME_IMAGE=dhi.io/python:3.15.2-debian13@sha256:c6c9414d78bd285be1a4dacfb94ae61732c77019605b1678792823e319b720f6
+ARG RUNTIME_IMAGE=dhi.io/python:3.15.2-debian13@sha256:d5387cad673412ef60e7fdadec757bd653c7dc289bfdccb4beff6d1ccec94f36
 
-FROM dhi.io/python:3.15.2-debian13-dev@sha256:c73e2cb9e8d56cfab7f01b99f67b2c830e84e7397dfe666d8bfaf5a69ad0ce85 AS deps
+FROM dhi.io/python:3.15.2-debian13-dev@sha256:a1069444b00f18a15f0088a7f6c33ed6070d7f2593919130892b22c5a4f124b7 AS deps
 ARG APP_COMMIT
 FROM ${RUNTIME_IMAGE}
 `
