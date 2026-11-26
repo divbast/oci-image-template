@@ -9,7 +9,8 @@ privileges, on a read-only root filesystem as a non-root user. Every new
 divbast image repository is made from it, by its entry in `divbast/infra`,
 and then changed as the README's "Making a new app" says, in that order:
 a Go app keeps the Go core, a PHP app moves the PHP layer, `layers/php`,
-into place, and a .NET app the .NET layer, `layers/dotnet`.
+into place, a .NET app the .NET layer, `layers/dotnet`, and a Python app
+the Python layer, `layers/python`.
 
 It publishes nothing to ghcr.io: its publish job rehearses. The divbast
 organisation's settings, rulesets and Renovate wiring live in
@@ -18,8 +19,10 @@ organisation's settings, rulesets and Renovate wiring live in
 What makes the image this app's lives here: the Containerfile, the app
 (`cmd/template`, `internal/server`), and the acceptance tests, beside the
 PHP layer: its Containerfile fragment, Caddy and PHP configuration, page,
-and health probe and endpoint; and beside the .NET layer: its whole
-Containerfile, demo app, health probe and build-stage checks. The pipeline
+and health probe and endpoint; beside the .NET layer: its whole
+Containerfile, demo app, health probe and build-stage checks; and beside
+the Python layer: its whole Containerfile, demo, health probe, lock tool
+and locks. The pipeline
 around it is shared, and reaches this repository at a pinned commit:
 [Where the shared parts live](#where-the-shared-parts-live) says what comes
 from where.
@@ -280,6 +283,63 @@ Each step needs the user's go-ahead:
 For the template alone, approving the major is the whole step: the demo's
 target framework follows its SDK, and no upstream waits on it.
 
+### The Python layer
+
+`layers/python` is the template's Python app, kept for a Python app to
+move into place, and like the others it is linted but never built. Its
+`Containerfile` is a whole one, lifted from sabnzbd-oci-image's, which
+replaces the root one at step 0 and is written for the layout that
+leaves. Each of its images sits where a `FROM` uses it; the toolchain
+stage's DHI packages are pinned too, which only the Renovate manager an
+app copies from SABnzbd moves. `just lint` runs `python-lint`: ruff
+format and ruff check, under every rule but the four `ruff.toml` lifts,
+each with its reason, and ty, under `ty.toml`, over the demo; then
+`go run ./layers/python/cmd/divbast-pins -C layers/python -check`, which
+reads PyPI. Then hadolint and `docker build --check` over the
+Containerfile. In CI, the lint job first verifies the layer's images,
+through `build.yml`'s `verify-containerfiles`. The Go gates reach the
+layer's probe and lock tool.
+
+- **The demo is the standard library alone.** `app/server.py` serves the
+  page on `/` and `ok` on `/healthz`, to GET or HEAD alone, whatever the
+  query, and an empty 404 to everything else, on 8080 on every address,
+  or every IPv4 one where the kernel has no IPv6. As PID 1 it handles
+  SIGTERM itself, finishes what it is answering, and exits 0
+- **`divbast-pins` locks the Python packages**, lifted from SABnzbd's and
+  generalised. `python/requirements.in` holds the app's own requirements,
+  or one `-r` line naming its upstream's `requirements.txt`: an https URL
+  at a full commit, written with the Containerfile's ARGs as `${NAME}`.
+  `python/pins.txt` pins what those leave unpinned or out, and the build
+  backends, each under a comment of its kind. It writes
+  `requirements.lock`, `build.lock` and `files.txt`, and `-check` holds
+  them to the pins. Nothing resolves dependencies: every package is
+  named, and the build's `pip check` fails on one that is not. Given
+  SABnzbd's inputs, it writes SABnzbd's locks, byte for byte but the
+  header; SABnzbd's own copy also writes unrar's checksum, a native tool's
+  pin being the app's to add. The demo needs no package, so its locks
+  hold their headers alone
+
+Once in place, these hold of it, and of SABnzbd:
+
+- **Every stage is a Docker Hardened Image, by digest**, its signature
+  verified first, and every apt package a stage installs is DHI's: the
+  toolchain stage deletes Debian's sources first
+- **No package's code runs with the network on.** Each file is fetched
+  by its sha256 with curl and checked, then pip builds and installs
+  offline: source releases with `--no-build-isolation
+  --check-build-dependencies`, from a build venv that never ships, into
+  `/app/venv`, which holds no pip, passes `pip check`, and is compiled for
+  `-OO` with bytecode that needs no timestamps
+- **One port, 8080, with health beside the page.** The app is PID 1 on
+  the runtime's Python. It cannot host a probe subcommand, so the probe,
+  `divbast-template`, is a static Go binary of its own, which the
+  `HEALTHCHECK` runs: `HealthPort` 0 and `HealthPath` `/healthz`
+- **What a Bazarr- or Calibre-shaped app adds** goes where the
+  Containerfile's comments say: a frontend stage on DHI's node image, as
+  Lidarr's; a stage for each native tool, as SABnzbd's unrar and 7zz,
+  with its `check-elf`; and the declared SBOM, named in the
+  `io.github.divbast.scan.sboms` label, which divbast/ci's scan reads
+
 ## Where the shared parts live
 
 - **divbast/ci.** `just setup` checks it out into `.ci/`, which git and
@@ -340,8 +400,10 @@ target framework follows its SDK, and no upstream waits on it.
 - `just lint` — pinact, zizmor, actionlint, ShellCheck and shfmt, the Go
   gates (the compiler, `go vet`, `go fix -diff`, `go mod tidy -diff`,
   `golangci-lint fmt --diff` and `golangci-lint run`), `go-test`, `reuse
-  lint`, hadolint, `docker build --check`, PHPStan over the PHP layer, and
-  `dotnet-lint`, hadolint and `docker build --check` over the .NET layer.
+  lint`, hadolint, `docker build --check`, PHPStan over the PHP layer,
+  `dotnet-lint`, hadolint and `docker build --check` over the .NET layer,
+  and `python-lint` (ruff, ty and the locks check), hadolint and
+  `docker build --check` over the Python layer.
   `go-test` runs every Go test under the race detector; the acceptance
   suite skips there, since `IMAGE` is unset
 - `just archive`, `just scan` — write the image as an OCI archive, then run
@@ -353,8 +415,8 @@ target framework follows its SDK, and no upstream waits on it.
 ## Where the toolchain comes from
 
 - **`mise.toml` is where tool versions are written.** Go, golangci-lint,
-  hadolint, ShellCheck, shfmt, actionlint, reuse, just, pinact, trivy,
-  grype, zizmor and cosign are all listed there. Every justfile recipe but `setup`, which
+  hadolint, ShellCheck, shfmt, ruff, ty, actionlint, reuse, just, pinact,
+  trivy, grype, zizmor and cosign are all listed there. Every justfile recipe but `setup`, which
   installs them, runs through `mise exec`, so a recipe resolves those
   binaries and not a same-named one on PATH. The recipes that call GitHub,
   pinact's and zizmor's, take a fine-grained token from `GITHUB_TOKEN` and
@@ -367,8 +429,9 @@ target framework follows its SDK, and no upstream waits on it.
   readonly is the default outside vendor mode, and still refuses to edit
   `go.mod`
 - **`just lint` needs a running Docker daemon**, for `docker build --check`,
-  logged in to dhi.io for the .NET layer's images, which `dotnet-lint` runs
-  and `--check` reads. `--check` is a buildx flag with no podman
+  logged in to dhi.io for the .NET and Python layers' images, which
+  `--check` reads and `dotnet-lint` runs; and the network, for the Python
+  layer's locks check, which reads PyPI. `--check` is a buildx flag with no podman
   equivalent, so that gate does not honour `ENGINE` and does not run
   without dockerd
 - **The .NET SDK is not in mise.** The demo is linted in the SDK image the

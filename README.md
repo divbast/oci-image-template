@@ -15,7 +15,9 @@ its app is written in. A Go app keeps the Go core. A PHP app served by
 FrankenPHP moves the PHP layer, `layers/php`, into place: the same page as
 a FrankenPHP app, linted here but not built. A .NET app moves the .NET
 layer, `layers/dotnet`, into place: the same page again, from ASP.NET Core,
-also linted here but not built.
+also linted here but not built. A Python app moves the Python layer,
+`layers/python`, into place: the same page from Python's standard
+library, linted here and not built either.
 [Making a new app](#making-a-new-app) lists what to change, in order.
 
 Its publish job rehearses: it runs every step of a real publish against a
@@ -44,6 +46,18 @@ package manager. The app is built in their .NET SDK image, and its health
 probe, a static Go binary on the standard library, in their Go image. All
 three are pinned by digest, and CI checks Docker's signature on each before
 the lint runs any of them.
+
+The Python layer runs a Python app on Docker Hardened Images' Python
+runtime, which holds Python and no shell or package manager, from a venv
+built in their Python `-dev` image. The venv's packages come from hash
+locks, `python/requirements.lock` and `python/build.lock`, which
+`go run ./cmd/divbast-pins` writes from `python/requirements.in` and
+`python/pins.txt`: every file is fetched by its sha256 first, then, with
+no network, the pure packages install from their wheels and the ones
+with C or Rust code build from source. The demo needs none. Its health
+probe is a static Go binary on the standard library, built in their Go
+image. All three are pinned by digest, and CI checks Docker's signature
+on each before the lint reads any of them.
 
 ## Container Features
 
@@ -234,15 +248,20 @@ rulesets, its `renovate` environment and its kill switch. divbast/infra's
 README says how. The copy arrives as one commit, and nothing in it is
 renamed for you. Then, in this order:
 
-0. **Go, PHP or .NET.** Choose once, first, since every step after names
-   the files of one of them. Each of the three deletes `layers/`, so
-   `.dockerignore`'s `layers/` line goes too, with its comment. A Go or
-   PHP app also drops the .NET layer's lint and verification: the
-   justfile's `dotnet-lint` recipe; the three `lint` lines after
-   PHPStan's, which run it, hadolint and `docker build --check` on the
-   layer; what `lint`'s comment says of the layer and dhi.io; and
+0. **Go, PHP, .NET or Python.** Choose once, first, since every step after
+   names the files of one of them. Each of the four deletes `layers/`, so
+   `.dockerignore`'s `layers/` line goes too, with its comment, and with
+   it the lint and verification of each layer the app does not move. The
+   .NET layer's are the justfile's `dotnet-lint` recipe and the three
+   `lint` lines after PHPStan's, which run it, hadolint and
+   `docker build --check` on the layer. The Python layer's are the
+   justfile's `python-lint` recipe and the three `lint` lines after those,
+   which run it, hadolint and `docker build --check` on that layer, and
+   `mise.toml`'s ruff and ty, with their comment. What `lint`'s comment
+   says of the layers, dhi.io and the network goes with them, and so does
    `verify-containerfiles` on `build.yml`'s `check` job, with its comment.
-   It drops the lines for a local dotnet build's output as well,
+   An app other than a .NET one drops the lines for a local dotnet build's
+   output as well,
    `src/**/bin` and `src/**/obj` in `.dockerignore` and `**/src/**/bin/`
    and `**/src/**/obj/` in `.gitignore`, each pair with its comment: kept,
    they would hide any `bin/` or `obj/` under a `src/` of the app's own
@@ -272,7 +291,7 @@ renamed for you. Then, in this order:
      [Prowlarr](https://github.com/divbast/prowlarr-oci-image) is the fully
      tested .NET app to follow. The layer's `Containerfile` is a whole one,
      written for the layout this leaves. From the repository's root:
-     1. `git rm -r cmd internal layers/php Containerfile`.
+     1. `git rm -r cmd internal layers/php layers/python Containerfile`.
      2. `git mv layers/dotnet/test/* test/`, beside `test/acceptance`.
      3. `git mv layers/dotnet/Containerfile layers/dotnet/cmd layers/dotnet/internal layers/dotnet/src .`
         Then delete the Containerfile's opening comment, on the layer and
@@ -286,9 +305,10 @@ renamed for you. Then, in this order:
         to rename with the module.
      6. In the justfile, delete `composer install` from `setup` and
         PHPStan from its comment, every `lint` line but the first, and
-        the `dotnet-lint` recipe. The first line's `app-lint` lints the
-        root Containerfile, now the .NET one, so `lint`'s comment says the
-        Docker daemon must be logged in to dhi.io for its images.
+        the `dotnet-lint` and `python-lint` recipes. The first line's
+        `app-lint` lints the root Containerfile, now the .NET one, so
+        `lint`'s comment says the Docker daemon must be logged in to
+        dhi.io for its images.
      7. On `build.yml`'s `check` job, delete `php: true` and
         `verify-containerfiles`, each with its comment. `dhi-username` and
         `DHI_TOKEN` stay, since the build reads dhi.io now.
@@ -302,6 +322,51 @@ renamed for you. Then, in this order:
      9. In `test/acceptance/serves_test.go`, delete `"/healthz"` from
         `refused`, and check with `harness.StatusIs` that GET `/healthz`
         answers 200. The comments follow here too.
+     10. Give the app's entry in divbast/infra `dhi = true`, which writes
+         the DHI login the workflows pass.
+   - **A Python app** moves `layers/python` into place, over the Go core;
+     [SABnzbd](https://github.com/divbast/sabnzbd-oci-image) is the fully
+     tested Python app to follow. The layer's `Containerfile` is a whole
+     one, written for the layout this leaves. From the repository's root:
+     1. `git rm -r cmd internal layers/php layers/dotnet Containerfile`.
+     2. `git mv layers/python/Containerfile layers/python/cmd layers/python/internal layers/python/app layers/python/python layers/python/ruff.toml layers/python/ty.toml .`
+        Then delete the Containerfile's opening comment, on the layer and
+        this move, which no longer holds.
+     3. `rm -rf layers`: nothing tracked is left in it, but PHPStan's
+        `vendor/` may be.
+     4. In `cmd/divbast-template/main.go`, `internal/probe/probe_test.go`,
+        `cmd/divbast-pins/main.go` and `cmd/divbast-pins/main_test.go`,
+        drop `/layers/python` from the import paths, which leaves
+        `github.com/divbast/oci-image-template/internal/…` for step 1 to
+        rename with the module.
+     5. In the justfile, delete `composer install` from `setup` and
+        PHPStan from its comment, every `lint` line but the first, and the
+        `dotnet-lint` recipe. In `python-lint`, drop `cd layers/python && `
+        and `-C layers/python`, so it lints the root, and run it from
+        `lint`, after the first line. The first line's `app-lint` lints the
+        root Containerfile, now the Python one, so `lint`'s comment says
+        the Docker daemon must be logged in to dhi.io for its images, and
+        that the lint needs the network, for the locks.
+     6. On `build.yml`'s `check` job, delete `php: true` and
+        `verify-containerfiles`, each with its comment. `dhi-username` and
+        `DHI_TOKEN` stay, since the build reads dhi.io now.
+     7. In `test/acceptance/contract_test.go`, health moves to the app
+        port, beside the page: delete the `healthPort` constant and
+        `HealthOnly404`, and set `HealthPort: 0` and
+        `HealthPath: "/healthz"`. `binary` becomes the probe,
+        `/usr/local/bin/divbast-template`, which `Exec` and `healthCmd`
+        run, and `serverArgv`, PID 1's argv, the demo on the venv's Python:
+        `[]string{"/app/venv/bin/python", "-OO", "/app/template/server.py"}`.
+        Their comments follow.
+     8. In `test/acceptance/serves_test.go`, delete `"/healthz"` from
+        `refused`, and check with `harness.StatusIs` that GET `/healthz`
+        answers 200. The comments follow here too.
+     9. In `renovate.json`, add SABnzbd's managers for `python/pins.txt`
+        and for the toolchain stage's DHI packages, with their
+        `packageRules`. A pull request that moves a pin runs
+        `go run ./cmd/divbast-pins`, so the locks move with it, which
+        divbast/ci's Renovate allows. A toolchain pin DHI has since
+        deleted fails the build until Renovate's first run moves it.
      10. Give the app's entry in divbast/infra `dhi = true`, which writes
          the DHI login the workflows pass.
 1. **Names.** Pick the app's name, `<app>`: the image will be
@@ -328,6 +393,12 @@ renamed for you. Then, in this order:
      `src/Template`, `Template.csproj` and `/app/bin/Template`, until step
      6 replaces it with the app, whose project file's name is its
      apphost's, and so PID 1's path;
+   - a Python app's probe, `cmd/divbast-template` and
+     `/usr/local/bin/divbast-template`, as `divbast-<app>`, everywhere it
+     is named: the Containerfile, the probe's messages and
+     `test/acceptance/contract_test.go`; and the app's tree,
+     `/app/template`, as `/app/<app>`, in the Containerfile and
+     `serverArgv`;
    - `build.yml`'s `version-arg` and `description`;
    - this README and `CLAUDE.md`.
 2. **The crons.** Give `build.yml`'s daily slot and `stall.yml`'s check
@@ -345,7 +416,13 @@ renamed for you. Then, in this order:
    entry for an `ARG` no `FROM` reads, and a `packageRules` entry naming its
    labels and commit prefix. LibreSpeed's `renovate.json` and its fetch
    stage are a worked example. A .NET app's fetch stage replaces the
-   backend stage's `COPY src/ ./`, as Prowlarr's does. An app that ships
+   backend stage's `COPY src/ ./`, as Prowlarr's does. A Python app's
+   replaces the fetch stage's `COPY app/ /app/template/`, as SABnzbd's
+   does. One built from an upstream that ships a `requirements.txt` names
+   it in `python/requirements.in`, by its one `-r` line at the commit
+   `ARG`, and Renovate's post-upgrade task for the upstream runs
+   `go run ./cmd/divbast-pins`, so the locks move with each release. An
+   app that ships
    the upstream's files adds the upstream's licence to the Containerfile's
    `org.opencontainers.image.licenses` `LABEL`, as `CLAUDE.md` requires.
    Which licence each file in the repository carries is REUSE's to say, by
@@ -376,7 +453,13 @@ renamed for you. Then, in this order:
    deletes the demo, `src/`, which its fetch stage replaced at step 4, and
    names the app's project where the Containerfile names
    `Template/Template.csproj`, and its apphost wherever `/app/bin/Template`
-   is named.
+   is named. A Python app deletes the demo, `app/`, which its fetch stage
+   replaced at step 4, names its entry point in the `ENTRYPOINT` and
+   `serverArgv`, lists what it installs in `python/requirements.in` and
+   what that leaves out in `python/pins.txt`, and runs
+   `go run ./cmd/divbast-pins`. With no Python of its own left, it also
+   drops ruff and ty, `python-lint`'s first line, `ruff.toml` and
+   `ty.toml`.
 7. **A PHP app's own binary.** A Go or .NET app skips this. Add the app to
    divbast/frankenphp in one pull request there:
    - `apps/<app>.env`, holding each of `PHP_EXTENSIONS`,
@@ -438,13 +521,16 @@ renamed for you. Then, in this order:
 - `just build` builds the image locally, without verifying the images it
   builds from; `just ci-tools && .ci/bin/divbast-verify-images` does, with
   cosign from `mise.toml`, and gh 2.102.0 or newer for a FrankenPHP
-  binary. With `-containerfile layers/dotnet/Containerfile`, and
-  `DHI_USERNAME` and `DHI_TOKEN` set, it verifies the .NET layer's.
+  binary. With `-containerfile layers/dotnet/Containerfile` or
+  `-containerfile layers/python/Containerfile`, and `DHI_USERNAME` and
+  `DHI_TOKEN` set, it verifies that layer's.
 - `just test` builds, then runs the acceptance suite against the image,
   under `ENGINE`, docker unless it says podman.
 - `just lint` runs every lint gate, and needs a running Docker daemon, for
-  `docker build --check`, logged in to dhi.io for the .NET layer's images,
-  which it reads and runs.
+  `docker build --check`, logged in to dhi.io for the .NET and Python
+  layers' images, which it reads and, for the .NET layer, runs; and the
+  network, since `python-lint` checks the Python layer's locks against
+  PyPI. `python-lint` also runs ruff and ty over the layer's demo.
 - `just ci` runs every gate, the scan included. Run it before committing.
 
 The recipes that call GitHub, pinact's and zizmor's, read a fine-grained

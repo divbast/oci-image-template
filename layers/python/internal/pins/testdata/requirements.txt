@@ -1,0 +1,22 @@
+# SPDX-License-Identifier: BSD-2-Clause
+# SPDX-FileCopyrightText: 2026 Aryan Ameri <github@aryan.ameri.coffee>
+
+# The kinds of line an upstream's requirements.txt holds, for the tests:
+# pins, a range, a package with no version beside its pin, comments, and
+# markers for Linux, Windows, macOS and older Pythons
+sabctools==10.0.0
+httptools==0.9.0
+CT3==3.4.0.post5
+cryptography>=3.0
+six==1.17.0
+python-dateutil==3.0.0
+pycparser; python_version >= '3.10'
+pycparser==3.12
+more-itertools  # any version, pinned below
+more-itertools==11.2.1
+notify2==0.3.1; sys_platform == 'linux'
+dbus-python==1.4.0; sys_platform == 'linux' and python_version < '3.10'
+pygobject==3.50.0; platform_system == 'Linux' and python_version < '3.10'
+pywin32==312; sys_platform == 'win32'
+winrt-runtime==3.2.1; sys_platform == 'win32'
+pyobjc-core==12.1; sys_platform == 'darwin'
