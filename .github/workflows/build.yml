@@ -17,12 +17,13 @@ on:
     # The daily slot, and the only automatic publish: it publishes main when
     # main moved since the commit the published :latest was built from, so
     # users see at most one new image a day however many merges land. It
-    # also checks whether something outside this repository has changed:
-    # the runner images, or the vulnerability database the scan reads, so a
-    # new advisory against the pinned image shows within a day rather than
-    # a week. 19:07 UTC is 06:07 in Melbourne under daylight saving, 05:07
-    # outside it: 20 minutes after the LibreSpeed image's slot, so the two
-    # images' runs do not share the organisation's 20 concurrent jobs.
+    # also checks whether something outside this repository has changed: the
+    # runner images, or the vulnerability database the scan reads, so a new
+    # advisory against the pinned image shows within a day rather than a
+    # week. 19:07 UTC is 06:07 in Melbourne under daylight saving, 05:07
+    # outside it: 20 minutes after the LibreSpeed image's slot. GitHub
+    # starts scheduled runs late and in batches, so runs set apart this way
+    # are less likely to start together.
     - cron: '07 19 * * *'
   # The button: run from main, it publishes now, for an urgent fix.
   workflow_dispatch:

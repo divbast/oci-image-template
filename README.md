@@ -401,11 +401,14 @@ renamed for you. Then, in this order:
      `serverArgv`;
    - `build.yml`'s `version-arg` and `description`;
    - this README and `CLAUDE.md`.
-2. **The crons.** Give `build.yml`'s daily slot and `stall.yml`'s check
-   times of their own, and update the comments that give their times and
-   their neighbours', so that neither starts with another repository's:
-   the organisation runs at most 20 jobs at once. `renovate.yml`'s cron can
-   stay as it is, since divbast's repositories share it.
+2. **The crons.** Give `renovate.yml`, `build.yml`'s daily slot and
+   `stall.yml`'s check times of their own, so that none starts with another
+   repository's: GitHub starts scheduled runs late and in batches, and runs
+   that share a minute start together. Pick `renovate.yml`'s minute from
+   the free ones in [Renovate times](#renovate-times) below, then add the
+   new repository's row to that table. Keep the order: Renovate, then the
+   daily slot, then the stall check. Update the comments that give the
+   times in Melbourne, and the neighbours' times.
 3. **The kill switch.** In `renovate.yml`, replace
    `OCI_IMAGE_TEMPLATE_AUTOMERGE`, in the job and in the comment above it,
    with the variable the app's entry in divbast/infra names, such as
@@ -508,6 +511,25 @@ renamed for you. Then, in this order:
    in `stall.yml` goes with that line.
 9. **The organisation's profile.** Add the image's row to the table in
    divbast/.github's profile README.
+
+### Renovate times
+
+Each divbast repository runs Renovate daily at a time of its own, in UTC,
+so that GitHub's late batches do not start them together. divbast/ci and
+divbast/renovate-config come first, so that their releases land before the
+others run. A new repository takes a time that is not in the table, after
+the last one and before its own daily slot.
+
+| Repository | Time (UTC) | Repository | Time (UTC) |
+|---|---|---|---|
+| ci | 16:05 | renovate-config | 16:12 |
+| .github | 16:19 | infra | 16:26 |
+| frankenphp | 16:33 | baikal | 16:40 |
+| librespeed | 16:47 | oci-image-template | 16:54 |
+| writefreely | 17:01 | sonarr | 17:08 |
+| radarr | 17:15 | lidarr | 17:22 |
+| prowlarr | 17:29 | sabnzbd | 17:36 |
+| calibre | 17:43 | pisati | 17:50 |
 
 ## Development
 
