@@ -10,7 +10,7 @@
 "aqua:mvdan/sh" = "3.14.1"
 # The Python layer's demo: ruff formats and lints it, and ty type-checks it
 "aqua:astral-sh/ruff" = "0.17.6"
-"aqua:astral-sh/ty" = "0.0.111"
+"aqua:astral-sh/ty" = "0.0.112"
 "aqua:rhysd/actionlint" = "1.7.12"
 "pipx:reuse" = "6.3.0"
 "aqua:casey/just" = "1.59.0"
