@@ -535,6 +535,7 @@ the last one and before its own daily slot.
 | radarr | 17:15 | lidarr | 17:22 |
 | prowlarr | 17:29 | sabnzbd | 17:36 |
 | calibre | 17:43 | pisati | 17:50 |
+| bazarr | 17:57 | native-tools | 18:04 |
 
 ## Development
 
