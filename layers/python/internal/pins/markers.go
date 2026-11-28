@@ -10,9 +10,38 @@ import (
 )
 
 // MarkerEnv is the platform a requirement's environment marker is judged
-// for: PEP 508's python_version, sys_platform and platform_system, the
-// three requirements files name for Linux, Windows and macOS.
-type MarkerEnv struct{ PythonVersion, SysPlatform, PlatformSystem string }
+// for, by PEP 508's variables. A requirements file is read for
+// python_version, sys_platform and platform_system alone, the three such
+// files name for Linux, Windows and macOS: a marker naming any other
+// variable is an error. Dist, when set, is a released package's
+// Requires-Dist, which names more.
+type MarkerEnv struct {
+	PythonVersion, SysPlatform, PlatformSystem string
+	Dist                                       *DistEnv
+}
+
+// DistEnv is what a Requires-Dist marker names beyond a requirements
+// file's three variables, read as pip check reads it: with no extra, so a
+// requirement only an extra asks for is never one, on CPython on Linux,
+// where os_name is "posix", implementation_name "cpython" and
+// platform_python_implementation "CPython".
+type DistEnv struct{ PythonFullVersion, PlatformMachine string }
+
+// DistEnvs are the platforms a Requires-Dist marker is judged for: the
+// image's Linux and CPython pythonFull, such as 3.15.2, on each
+// architecture it builds for, in the order of arches.
+func DistEnvs(pythonFull string) []MarkerEnv {
+	major, rest, _ := strings.Cut(pythonFull, ".")
+	minor, _, _ := strings.Cut(rest, ".")
+	envs := make([]MarkerEnv, 0, len(arches))
+	for _, arch := range arches {
+		envs = append(envs, MarkerEnv{
+			PythonVersion: major + "." + minor, SysPlatform: "linux", PlatformSystem: "Linux",
+			Dist: &DistEnv{PythonFullVersion: pythonFull, PlatformMachine: arch},
+		})
+	}
+	return envs
+}
 
 // EvalMarker judges expr, a PEP 508 environment marker, for env. It reads
 // comparisons joined by "and" and "or", in parentheses or not, each a
@@ -144,10 +173,19 @@ func (p *markerParser) compare(variable, op, value string, reversed bool) (bool,
 	if !map[string]bool{"==": true, "!=": true, "<": true, "<=": true, ">": true, ">=": true}[op] {
 		return false, fmt.Errorf("the operator %s is not one this tool reads", op)
 	}
+	unknown := fmt.Errorf("the variable %s is not one this tool knows the image's value of", variable)
+	d := p.env.Dist
 	var have string
 	switch variable {
-	case "python_version":
-		order, err := compareVersions(p.env.PythonVersion, value)
+	case "python_version", "python_full_version":
+		v := p.env.PythonVersion
+		if variable == "python_full_version" {
+			if d == nil {
+				return false, unknown
+			}
+			v = d.PythonFullVersion
+		}
+		order, err := compareVersions(v, value)
 		if err != nil {
 			return false, err
 		}
@@ -159,8 +197,17 @@ func (p *markerParser) compare(variable, op, value string, reversed bool) (bool,
 		have = p.env.SysPlatform
 	case "platform_system":
 		have = p.env.PlatformSystem
+	case "extra", "os_name", "implementation_name", "platform_python_implementation", "platform_machine":
+		if d == nil {
+			return false, unknown
+		}
+		// pip check reads no extra: extra == "x" is false, and != true
+		have = map[string]string{
+			"os_name": "posix", "implementation_name": "cpython", "platform_python_implementation": "CPython",
+			"platform_machine": d.PlatformMachine,
+		}[variable]
 	default:
-		return false, fmt.Errorf("the variable %s is not one this tool knows the image's value of", variable)
+		return false, unknown
 	}
 	switch op {
 	case "==":

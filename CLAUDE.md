@@ -311,8 +311,17 @@ layer's probe and lock tool.
   at a full commit, written with the Containerfile's ARGs as `${NAME}`.
   `python/pins.txt` pins what those leave unpinned or out, and the build
   backends, each under a comment of its kind. It writes
-  `requirements.lock`, `build.lock` and `files.txt`, and `-check` holds
-  them to the pins. Nothing resolves dependencies: every package is
+  `requirements.lock`, `build.lock`, `files.txt` and
+  `renovate-bounds.json`, and `-check` holds them to the pins. The last is
+  a Renovate preset, which an app's `renovate.json` extends: for each pin,
+  every specifier upstream and the locks' packages ask of it, read as
+  `pip check` reads their `Requires-Dist` (no `extra`, CPython on Linux,
+  either architecture), with a rule only where one could refuse a newer
+  version, and a group for a pin that asks another for its own version.
+  A marker or specifier it cannot read is an error, since Renovate
+  refuses a whole config over one bad `allowedVersions`. A source build's
+  own requirements are in its sdist alone, so such a bound is a
+  hand-written rule. Nothing resolves dependencies: every package is
   named, and the build's `pip check` fails on one that is not. Given
   SABnzbd's inputs, it writes SABnzbd's locks, byte for byte but the
   header; SABnzbd's own copy also writes unrar's checksum, a native tool's

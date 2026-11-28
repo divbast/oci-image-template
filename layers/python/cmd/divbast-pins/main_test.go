@@ -71,6 +71,12 @@ func servers(t *testing.T, yanked ...string) (src pins.Sources, base string) {
 		}
 		return out
 	}
+	// What a release requires, as PyPI's info.requires_dist gives it: six
+	// bounds pins.txt's cryptography from above, on the image's Python,
+	// and asks for more only of an extra
+	requires := map[string][]string{
+		"/pypi/six/1.17.0/json": {`cryptography<51,>=40; python_version >= "3.10"`, `cryptography<50; extra == "old"`},
+	}
 	pypi := map[string][]map[string]any{
 		"/pypi/six/1.17.0/json":          release("six-1.17.0-py2.py3-none-any.whl", "six-1.17.0.tar.gz"),
 		"/pypi/ujson/6.0.0/json":         release("ujson-6.0.0-cp315-cp315-manylinux_2_17_x86_64.manylinux2014_x86_64.whl", "ujson-6.0.0.tar.gz"),
@@ -82,7 +88,7 @@ func servers(t *testing.T, yanked ...string) (src pins.Sources, base string) {
 		case r.URL.Path == upstreamPath:
 			_, _ = w.Write([]byte(requirements))
 		case pypi[r.URL.Path] != nil:
-			_ = json.NewEncoder(w).Encode(map[string]any{"urls": pypi[r.URL.Path]})
+			_ = json.NewEncoder(w).Encode(map[string]any{"urls": pypi[r.URL.Path], "info": map[string]any{"requires_dist": requires[r.URL.Path]}})
 		default:
 			http.NotFound(w, r)
 		}
@@ -156,6 +162,19 @@ func checkLocks(t *testing.T, dir string) {
 	if n := strings.Count(files, " https://"); n != 4 {
 		t.Errorf("files.txt names %d files, want the 4 the locks take", n)
 	}
+	bounds := read(t, dir, "python/renovate-bounds.json")
+	for _, want := range []string{
+		`"description": "cryptography: upstream asks for >=3.0; six 1.17.0 requires <51,>=40."`,
+		`"matchPackageNames": [` + "\n" + `        "cryptography"`,
+		`"allowedVersions": "<51,>=3.0,>=40"`,
+	} {
+		if !strings.Contains(bounds, want) {
+			t.Errorf("renovate-bounds.json =\n%s\nwant it to hold %s", bounds, want)
+		}
+	}
+	if n := strings.Count(bounds, `"allowedVersions"`); n != 1 {
+		t.Errorf("renovate-bounds.json holds %d rules; want cryptography's alone", n)
+	}
 	if got := read(t, dir, "Containerfile"); got != containerfile {
 		t.Error("the Containerfile changed, which the tool only reads")
 	}
@@ -196,6 +215,20 @@ func TestCheckMode(t *testing.T) {
 	}
 	if got := read(t, dir, "python/requirements.lock"); got != stale {
 		t.Error("-check rewrote the lock")
+	}
+
+	// So are bounds edited by hand
+	if err := os.WriteFile(filepath.Join(dir, "python", "requirements.lock"), []byte(lock), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	bounds := read(t, dir, "python/renovate-bounds.json")
+	loosened := strings.Replace(bounds, `"<51,>=3.0,>=40"`, `">=3.0"`, 1)
+	if err := os.WriteFile(filepath.Join(dir, "python", "renovate-bounds.json"), []byte(loosened), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	code, out, _ = runIn(t, src, dir, "-check")
+	if code != 1 || !strings.Contains(out, "--- python/renovate-bounds.json") || !strings.Contains(out, `+      "allowedVersions": "<51,>=3.0,>=40"`) {
+		t.Errorf("-check of loosened bounds = %d,\n%s\nwant 1 and a diff restoring them", code, out)
 	}
 }
 

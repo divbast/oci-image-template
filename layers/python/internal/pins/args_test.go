@@ -22,8 +22,8 @@ FROM ${RUNTIME_IMAGE}
 
 func TestReadArgs(t *testing.T) {
 	t.Parallel()
-	if got, err := ReadArgs([]byte(containerfile)); err != nil || got != (Args{PythonVersion: "3.15"}) {
-		t.Errorf("ReadArgs() = %+v, %v; want Python 3.15", got, err)
+	if got, err := ReadArgs([]byte(containerfile)); err != nil || got != (Args{PythonVersion: "3.15", PythonFullVersion: "3.15.2"}) {
+		t.Errorf("ReadArgs() = %+v, %v; want Python 3.15, at 3.15.2", got, err)
 	}
 	for _, tt := range []struct{ name, text, want string }{
 		// The -dev image and the runtime must be one Python

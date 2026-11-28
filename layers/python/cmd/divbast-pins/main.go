@@ -25,7 +25,12 @@
 //   - python/build.lock: the build backends pins.txt names, with the
 //     sha256 of each wheel a build stage may install;
 //   - python/files.txt: every file of both locks, by its sha256 and URL,
-//     which the build fetches and checks before pip reads anything.
+//     which the build fetches and checks before pip reads anything;
+//   - python/renovate-bounds.json: a Renovate preset, which the app's
+//     renovate.json extends, with a rule for each pin of pins.txt that
+//     upstream or a package of either lock bounds from above, as pip check
+//     reads the packages' requirements, so Renovate proposes no version of
+//     it the build would refuse.
 //
 // Renovate runs it in each pull request that moves one of those pins.
 // With -check it writes nothing, prints a unified diff of each file that
