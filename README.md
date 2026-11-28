@@ -363,9 +363,12 @@ renamed for you. Then, in this order:
         answers 200. The comments follow here too.
      9. In `renovate.json`, add SABnzbd's managers for `python/pins.txt`
         and for the toolchain stage's DHI packages, with their
-        `packageRules`. A pull request that moves a pin runs
-        `go run ./cmd/divbast-pins`, so the locks move with it, which
-        divbast/ci's Renovate allows. A toolchain pin DHI has since
+        `packageRules`, and add
+        `github>divbast/<repository>//python/renovate-bounds` to its
+        `extends`, naming this repository: the bounds divbast-pins writes,
+        so Renovate proposes no pin the build would refuse. A pull request
+        that moves a pin runs `go run ./cmd/divbast-pins`, so the locks
+        and the bounds move with it, which divbast/ci's Renovate allows. A toolchain pin DHI has since
         deleted fails the build until Renovate's first run moves it.
      10. Give the app's entry in divbast/infra `dhi = true`, which writes
          the DHI login the workflows pass.

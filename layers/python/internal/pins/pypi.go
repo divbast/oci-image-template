@@ -95,13 +95,17 @@ type File struct {
 	YankedReason      string
 }
 
-// files reads the files of name's release version.
-func (c *PyPI) files(ctx context.Context, name, version string) ([]File, error) {
+// files reads the files of name's release version, and the release's
+// Requires-Dist.
+func (c *PyPI) files(ctx context.Context, name, version string) ([]File, []string, error) {
 	body, err := get(ctx, c.Client, c.Base+"/pypi/"+url.PathEscape(Normalize(name))+"/"+url.PathEscape(version)+"/json", c.Delays)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	var rel struct {
+		Info struct {
+			RequiresDist []string `json:"requires_dist"`
+		} `json:"info"`
 		URLs []struct {
 			Filename    string `json:"filename"`
 			PackageType string `json:"packagetype"`
@@ -114,12 +118,12 @@ func (c *PyPI) files(ctx context.Context, name, version string) ([]File, error) 
 		} `json:"urls"`
 	}
 	if err = json.Unmarshal(body, &rel); err != nil {
-		return nil, fmt.Errorf("%s %s: PyPI's answer is no release: %w", name, version, err)
+		return nil, nil, fmt.Errorf("%s %s: PyPI's answer is no release: %w", name, version, err)
 	}
 	var out []File
 	for _, f := range rel.URLs {
 		if !sha256Hex.MatchString(f.Digests.SHA256) {
-			return nil, fmt.Errorf("%s %s: PyPI gives %s no sha256", name, version, f.Filename)
+			return nil, nil, fmt.Errorf("%s %s: PyPI gives %s no sha256", name, version, f.Filename)
 		}
 		reason := ""
 		if f.YankedReason != nil {
@@ -131,7 +135,7 @@ func (c *PyPI) files(ctx context.Context, name, version string) ([]File, error) 
 		})
 	}
 	slices.SortFunc(out, func(a, b File) int { return cmp.Compare(a.Name, b.Name) })
-	return out, nil
+	return out, rel.Info.RequiresDist, nil
 }
 
 var sha256Hex = regexp.MustCompile(`^[0-9a-f]{64}$`)
@@ -166,6 +170,11 @@ type Locked struct {
 	// ==, which pip installs all the same, and YankedReason PyPI's reason.
 	Yanked       bool
 	YankedReason string
+	// Requires is the release's Requires-Dist, as PyPI gives it: each a
+	// requirement with its marker. PyPI gives none for a release whose
+	// metadata names none, and for some old source releases whose metadata
+	// it never read.
+	Requires []string
 }
 
 // yanked reports whether PyPI has yanked the release files are of, and
@@ -193,11 +202,11 @@ func refuseYanked(p Pinned, reason string) error {
 // error, and so is a yanked one, unless upstream pins it with ==: pip
 // installs a yanked release pinned so, and nothing here may move that pin.
 func ChooseFiles(ctx context.Context, c *PyPI, p Pinned) (Locked, error) {
-	files, err := c.files(ctx, p.Name, p.Version)
+	files, requires, err := c.files(ctx, p.Name, p.Version)
 	if err != nil {
 		return Locked{}, fmt.Errorf("%s %s: %w", p.Name, p.Version, err)
 	}
-	l := Locked{Name: p.Name, Version: p.Version, Why: p.Why}
+	l := Locked{Name: p.Name, Version: p.Version, Why: p.Why, Requires: requires}
 	if y, reason := yanked(files); y {
 		if !p.Upstream {
 			return Locked{}, refuseYanked(p, reason)
@@ -270,7 +279,7 @@ func glibcWheel(f File) string {
 // wheel of one, such as maturin's, which has no pure wheel, is a build
 // tool, as the compilers are.
 func ChooseBuildFiles(ctx context.Context, c *PyPI, p Pinned) (Locked, error) {
-	files, err := c.files(ctx, p.Name, p.Version)
+	files, requires, err := c.files(ctx, p.Name, p.Version)
 	if err != nil {
 		return Locked{}, fmt.Errorf("%s %s: %w", p.Name, p.Version, err)
 	}
@@ -278,7 +287,7 @@ func ChooseBuildFiles(ctx context.Context, c *PyPI, p Pinned) (Locked, error) {
 	if y, reason := yanked(files); y {
 		return Locked{}, refuseYanked(p, reason)
 	}
-	l := Locked{Name: p.Name, Version: p.Version, Why: p.Why}
+	l := Locked{Name: p.Name, Version: p.Version, Why: p.Why, Requires: requires}
 	if i := slices.IndexFunc(files, pure); i >= 0 {
 		l.Files = []File{files[i]}
 		return l, nil

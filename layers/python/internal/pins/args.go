@@ -12,9 +12,9 @@ import (
 )
 
 // Args is what the tool reads from the Containerfile: the Python the image
-// runs, as major.minor.
+// runs, as major.minor, and as major.minor.patch.
 type Args struct {
-	PythonVersion string
+	PythonVersion, PythonFullVersion string
 }
 
 // pythonTag is a DHI Python image's version, in its tag.
@@ -43,7 +43,7 @@ func ReadArgs(containerfile []byte) (Args, error) {
 	case 0:
 		return Args{}, errors.New("the Containerfile names no dhi.io/python:<x.y.z>- image, so nothing says which Python the venv is for")
 	case 1:
-		return Args{PythonVersion: versions[0][:strings.LastIndex(versions[0], ".")]}, nil
+		return Args{PythonVersion: versions[0][:strings.LastIndex(versions[0], ".")], PythonFullVersion: versions[0]}, nil
 	default:
 		return Args{}, fmt.Errorf("the Containerfile names Pythons %s: the -dev image and the runtime must be one", strings.Join(versions, " and "))
 	}

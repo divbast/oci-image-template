@@ -59,7 +59,10 @@ const fetchers = 8
 //   - requirements.lock, from the requirements, for Linux and the
 //     Containerfile's Python, merged with the pins they leave to pins.txt;
 //   - build.lock, pins.txt's build backends;
-//   - files.txt, every file of both locks by its sha256 and its URL.
+//   - files.txt, every file of both locks by its sha256 and its URL;
+//   - renovate-bounds.json, a Renovate preset with a rule for each pin
+//     that upstream or a package of either lock bounds, as Bounds says,
+//     so Renovate proposes no version of it the build would refuse.
 //
 // The notes are what a person should know though nothing failed: each
 // yanked release the requirements pin with ==, which the lock keeps.
@@ -112,8 +115,12 @@ func Generate(ctx context.Context, src Sources, root *os.Root) (out map[string][
 	if err != nil {
 		return nil, nil, err
 	}
+	bounds, groups, err := Bounds(pins, reqs, locked, backends, DistEnvs(args.PythonFullVersion))
+	if err != nil {
+		return nil, nil, err
+	}
 
-	var req, build, list bytes.Buffer
+	var req, build, list, limits bytes.Buffer
 	err = errors.Join(
 		WriteLock(&req, Lock{Header: header, Packages: locked}),
 		WriteLock(&build, Lock{Header: []string{
@@ -127,6 +134,7 @@ func Generate(ctx context.Context, src Sources, root *os.Root) (out map[string][
 			"and checks it before pip reads anything, so no package's code runs with the network on.",
 			again,
 		}, slices.Concat(locked, backends)),
+		WriteBounds(&limits, bounds, groups),
 	)
 	if err != nil {
 		return nil, nil, err
@@ -141,7 +149,9 @@ func Generate(ctx context.Context, src Sources, root *os.Root) (out map[string][
 				"kept, as pip installs a yanked release pinned with ==", l.Name, l.Version, reason))
 		}
 	}
-	return map[string][]byte{RequirementsLockPath: req.Bytes(), BuildLockPath: build.Bytes(), FilesPath: list.Bytes()}, notes, nil
+	return map[string][]byte{
+		RequirementsLockPath: req.Bytes(), BuildLockPath: build.Bytes(), FilesPath: list.Bytes(), BoundsPath: limits.Bytes(),
+	}, notes, nil
 }
 
 // include is a -r line, which names another requirements file.
