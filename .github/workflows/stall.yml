@@ -26,7 +26,7 @@ concurrency:
 jobs:
   stall:
     name: stall
-    uses: divbast/ci/.github/workflows/stall.yml@d0db843c72508bc6e3a7429d7401a575632bea57 # v5.2.0
+    uses: divbast/ci/.github/workflows/stall.yml@884b8941ce8b243b9d90d10780f9a395ef681139 # v5.4.0
     with:
       # No slots: they count the slots that should have published, and this
       # repository publishes nothing to ghcr.io. An app turns them on once
