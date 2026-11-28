@@ -31,7 +31,7 @@ jobs:
       # No slots: they count the slots that should have published, and this
       # repository publishes nothing to ghcr.io. An app turns them on once
       # its first image is public: README.md's "Making a new app", step 8.
-      checks: '["open","stuck","renovate","lookups"]'
+      checks: '["open","stuck","renovate","lookups","starved","flaky"]'
     # Everything stall.yml's job asks for, slots or not: a called job that
     # asks for more than its caller grants fails.
     permissions:

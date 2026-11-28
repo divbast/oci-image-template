@@ -499,8 +499,10 @@ renamed for you. Then, in this order:
    as an anonymous client, and fails while the package is private; a
    package that starts private is made public in its settings, and the
    button run again. **Then** turn slots on in `stall.yml`: remove its
-   `checks` line, whose default runs all four checks, slots among them,
-   and add `published: ghcr.io/divbast/<app>:latest` under its `with`.
+   `checks` line, whose default runs every check ci's `stall.yml` has
+   (open, stuck, renovate, slots, lookups, starved and flaky), and add
+   `published: ghcr.io/divbast/<app>:latest` under its `with`. A
+   repository that sets its own list adds `starved` and `flaky` to it.
    LibreSpeed's `stall.yml` is that shape: `published` alone. In that
    order: until the image is public, slots count every slot run since the
    repository was made as a lost slot. Then rewrite what says the app
